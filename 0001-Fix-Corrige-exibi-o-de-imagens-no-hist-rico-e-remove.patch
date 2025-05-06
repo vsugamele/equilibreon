@@ -1,0 +1,742 @@
+From fd6f96d3a3cedd39874c6192c057d5c04c02c6e2 Mon Sep 17 00:00:00 2001
+From: Administrador <usuario@example.com>
+Date: Tue, 6 May 2025 17:30:13 -0300
+Subject: [PATCH] =?UTF-8?q?Fix:=20Corrige=20exibi=C3=A7=C3=A3o=20de=20imag?=
+ =?UTF-8?q?ens=20no=20hist=C3=B3rico=20e=20remove=20bot=C3=A3o=20adicionar?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ .../nutrition/MealAnalysisDialog.tsx          |  46 ++-
+ src/components/nutrition/MealTracker.tsx      |   7 -
+ .../nutrition/NutritionHistoryModal.tsx       | 287 ++++++++----------
+ src/index.css                                 |  42 +++
+ src/services/foodAnalysisService_fixed.ts     |   4 +-
+ src/services/mealAnalysisService.ts           |   2 +-
+ src/services/openaiService.ts                 | 154 ++++++----
+ 7 files changed, 308 insertions(+), 234 deletions(-)
+
+diff --git a/src/components/nutrition/MealAnalysisDialog.tsx b/src/components/nutrition/MealAnalysisDialog.tsx
+index a9db4ff..b5ced17 100644
+--- a/src/components/nutrition/MealAnalysisDialog.tsx
++++ b/src/components/nutrition/MealAnalysisDialog.tsx
+@@ -82,14 +82,44 @@ const MealAnalysisDialog: React.FC<MealAnalysisDialogProps> = ({
+     
+     setIsAnalyzing(true);
+     
++    // Mostrar mensagem de processamento
++    toast.loading("Analisando sua refeição...", {
++      description: "Estamos identificando todos os componentes do seu prato. Isso pode levar alguns segundos.",
++      duration: 30000, // 30 segundos
++      id: "meal-analysis-toast"
++    });
++    
++    // Atualizar o painel de nutrição com efeito de processamento
++    const updateProcessingStatus = () => {
++      const nutritionBoxes = document.querySelectorAll('.nutrition-value-panel');
++      if (nutritionBoxes && nutritionBoxes.length > 0) {
++        nutritionBoxes.forEach(box => {
++          box.classList.add('pulse-animation');
++          box.setAttribute('data-processing', 'true');
++        });
++      }
++    };
++    
++    // Executar a animação de processamento
++    updateProcessingStatus();
++    
+     try {
+       const result = await analyzeMealImage(selectedFile, mealName);
+       
+       if (result) {
+         setAnalysis(result);
++        toast.dismiss("meal-analysis-toast"); // Remover toast de carregamento
+         toast.success("Análise concluída!", {
+-          description: "Confira os detalhes nutricionais da sua refeição"
++          description: "Identificamos todos os componentes do seu prato. Confira os detalhes nutricionais."
+         });
++        
++        // Adicionar as calorias ao painel principal imediatamente
++        if (onMealConfirmed && result) {
++          // Preparar objeto para notificar componente pai
++          const confirmedAnalysis = { ...result, confirmed: true };
++          // Chamar callback com análise confirmada
++          setTimeout(() => onMealConfirmed(confirmedAnalysis), 500);
++        }
+       } else {
+         toast.error("Falha na análise", {
+           description: "Não foi possível analisar esta imagem. Tente outra foto."
+@@ -97,11 +127,21 @@ const MealAnalysisDialog: React.FC<MealAnalysisDialogProps> = ({
+       }
+     } catch (error) {
+       console.error('Erro ao analisar refeição:', error);
+-      toast.error("Erro", {
+-        description: "Ocorreu um erro durante a análise. Tente novamente."
++      toast.dismiss("meal-analysis-toast"); // Remover toast de carregamento
++      toast.error("Erro na análise", {
++        description: "Não conseguimos analisar completamente sua refeição. Tente uma foto com melhor iluminação e ângulo."
+       });
+     } finally {
+       setIsAnalyzing(false);
++      
++      // Remover efeito de processamento
++      const nutritionBoxes = document.querySelectorAll('.nutrition-value-panel');
++      if (nutritionBoxes && nutritionBoxes.length > 0) {
++        nutritionBoxes.forEach(box => {
++          box.classList.remove('pulse-animation');
++          box.removeAttribute('data-processing');
++        });
++      }
+     }
+   };
+   
+diff --git a/src/components/nutrition/MealTracker.tsx b/src/components/nutrition/MealTracker.tsx
+index 8e5bb1c..1f252e9 100644
+--- a/src/components/nutrition/MealTracker.tsx
++++ b/src/components/nutrition/MealTracker.tsx
+@@ -222,13 +222,6 @@ const MealTracker: React.FC<MealTrackerProps> = ({ className }) => {
+               <ImagePlus className="h-4 w-4" />
+               <span className="hidden md:inline">Analisar</span>
+             </Button>
+-            <Button 
+-              variant="outline" 
+-              size="sm" 
+-              onClick={() => setShowInput(true)}
+-            >
+-              Adicionar
+-            </Button>
+           </div>
+         </div>
+ 
+diff --git a/src/components/nutrition/NutritionHistoryModal.tsx b/src/components/nutrition/NutritionHistoryModal.tsx
+index d36a7bc..39492df 100644
+--- a/src/components/nutrition/NutritionHistoryModal.tsx
++++ b/src/components/nutrition/NutritionHistoryModal.tsx
+@@ -143,219 +143,184 @@ const NutritionHistoryModal: React.FC<NutritionHistoryModalProps> = ({
+     });
+     
+     return (
+-      <div key={meal.id} className="border rounded-lg p-3 mb-3 last:mb-0">
+-        <div className="flex justify-between items-start">
+-          <div>
+-            <div className="flex items-center gap-1">
+-              <span className="font-medium">{mealTypeNames[meal.meal_type] || 'Refeição'}</span>
+-              <span className="text-sm text-slate-500">{mealTime}</span>
++      <div key={meal.id} className="border-b border-slate-200 dark:border-slate-700 last:border-0 py-3">
++        <div className="flex justify-between items-start mb-2">
++          {/* Lado esquerdo com imagem (se disponível) */}
++          <div className="flex items-start gap-3">
++            {/* Imagem da refeição */}
++            {meal.photo_url ? (
++              <div className="flex-shrink-0">
++                <img 
++                  src={meal.photo_url} 
++                  alt={meal.description}
++                  className="meal-history-image"
++                  loading="lazy"
++                  onError={(e) => {
++                    const img = e.target as HTMLImageElement;
++                    img.style.display = 'none'; // Esconder imagem quebrada
++                  }}
++                />
++              </div>
++            ) : (
++              <div className="flex-shrink-0 w-[60px] h-[60px] bg-slate-100 dark:bg-slate-800 rounded-lg flex items-center justify-center">
++                <UtensilsCrossed className="h-5 w-5 text-slate-400" />
++              </div>
++            )}
++            
++            {/* Nome e horário */}
++            <div>
++              <h4 className="font-medium dark:text-slate-100">{meal.description}</h4>
++              <p className="text-xs text-slate-500 dark:text-slate-400">{mealTime}</p>
+             </div>
+-            <p className="text-sm mt-1">{meal.description}</p>
+           </div>
+-          {meal.photo_url && (
+-            <div className="w-16 h-16 rounded-md overflow-hidden flex-shrink-0">
+-              <img 
+-                src={meal.photo_url} 
+-                alt={meal.description}
+-                className="w-full h-full object-cover"
+-              />
+-            </div>
+-          )}
++          
++          <div className="text-right">
++            <p className="text-sm font-semibold dark:text-slate-100">{meal.calories} kcal</p>
++            <p className="text-xs text-slate-500 dark:text-slate-400">
++              P: {meal.protein}g | C: {meal.carbs}g | G: {meal.fat}g
++            </p>
++          </div>
+         </div>
+         
+-        <div className="grid grid-cols-4 gap-2 mt-2 text-center">
+-          <div>
+-            <div className="text-sm font-medium">{meal.calories}</div>
+-            <div className="text-xs text-slate-500">kcal</div>
++        <div className="grid grid-cols-4 gap-1 text-xs text-center">
++          <div className="py-1 px-2 bg-red-100 dark:bg-red-900/30 rounded nutrition-value-panel">
++            <p className="font-medium dark:text-red-400">{Math.round((meal.protein * 4 / meal.calories) * 100)}%</p>
++            <p className="text-slate-600 dark:text-slate-500">Proteína</p>
+           </div>
+-          <div>
+-            <div className="text-sm font-medium">{meal.protein}g</div>
+-            <div className="text-xs text-slate-500">Proteína</div>
++          <div className="py-1 px-2 bg-yellow-100 dark:bg-yellow-900/30 rounded nutrition-value-panel">
++            <p className="font-medium dark:text-yellow-400">{Math.round((meal.carbs * 4 / meal.calories) * 100)}%</p>
++            <p className="text-slate-600 dark:text-slate-500">Carboidratos</p>
+           </div>
+-          <div>
+-            <div className="text-sm font-medium">{meal.carbs}g</div>
+-            <div className="text-xs text-slate-500">Carbos</div>
++          <div className="py-1 px-2 bg-blue-100 dark:bg-blue-900/30 rounded nutrition-value-panel">
++            <p className="font-medium dark:text-blue-400">{Math.round((meal.fat * 9 / meal.calories) * 100)}%</p>
++            <p className="text-slate-600 dark:text-slate-500">Gorduras</p>
+           </div>
+-          <div>
+-            <div className="text-sm font-medium">{meal.fat}g</div>
+-            <div className="text-xs text-slate-500">Gordura</div>
++          <div className="py-1 px-2 bg-green-100 dark:bg-green-900/30 rounded nutrition-value-panel">
++            <p className="font-medium dark:text-green-400">--</p>
++            <p className="text-slate-600 dark:text-slate-500">Fibras</p>
+           </div>
+         </div>
+-        
+-        {meal.foods && meal.foods.length > 0 && (
+-          <div className="mt-2 text-xs text-slate-500">
+-            {meal.foods.join(', ')}
+-          </div>
++
++        {meal.notes && (
++          <p className="mt-2 text-xs italic text-slate-500 dark:text-slate-400">
++            {meal.notes}
++          </p>
+         )}
+       </div>
+     );
+   };
+-  
+-  const selectedDay = getSelectedDayData();
+-  
++
+   return (
+     <Dialog open={open} onOpenChange={onOpenChange}>
+-      <DialogContent className="sm:max-w-[550px] max-h-[80vh] overflow-y-auto">
++      <DialogContent className="w-full max-w-4xl">
+         <DialogHeader>
+-          <DialogTitle className="flex items-center gap-2">
+-            <UtensilsCrossed className="h-5 w-5 text-primary" />
+-            Histórico de Nutrição
+-          </DialogTitle>
++          <DialogTitle>Histórico de Nutrição</DialogTitle>
+           <DialogDescription>
+-            Seu registro de refeições nos últimos 7 dias
++            Análise e histórico das suas refeições e nutrição
+           </DialogDescription>
+         </DialogHeader>
+         
+         {loading ? (
+-          <div className="space-y-4 py-4">
+-            <Skeleton className="h-8 w-full" />
+-            <Skeleton className="h-20 w-full" />
+-            <Skeleton className="h-20 w-full" />
++          <div className="space-y-3">
++            <Skeleton className="h-24 w-full rounded-md" />
++            <Skeleton className="h-32 w-full rounded-md" />
++            <Skeleton className="h-24 w-full rounded-md" />
+           </div>
+         ) : (
+-          <Tabs defaultValue="daily" className="mt-4">
++          <Tabs defaultValue="daily">
+             <TabsList className="grid w-full grid-cols-2">
+-              <TabsTrigger value="daily">
+-                <CalendarDays className="h-4 w-4 mr-2" />
+-                Diário
++              <TabsTrigger value="daily" className="flex items-center gap-2">
++                <CalendarDays className="h-4 w-4" />
++                <span>Refeições por dia</span>
+               </TabsTrigger>
+-              <TabsTrigger value="overview">
+-                <TrendingUp className="h-4 w-4 mr-2" />
+-                Visão Geral
++              <TabsTrigger value="stats" className="flex items-center gap-2">
++                <TrendingUp className="h-4 w-4" />
++                <span>Estatísticas</span>
+               </TabsTrigger>
+             </TabsList>
+             
+-            <TabsContent value="daily" className="pt-4">
+-              {nutritionHistory.length > 0 ? (
+-                <>
+-                  {/* Seletor de data */}
+-                  <div className="flex items-center space-x-1 overflow-x-auto pb-2 mb-4 scrollbar-none">
+-                    {nutritionHistory.map((day) => (
+-                      <Button
+-                        key={day.date}
+-                        variant={selectedDate === day.date ? "default" : "outline"}
+-                        className="min-w-[85px] flex-shrink-0"
+-                        size="sm"
+-                        onClick={() => setSelectedDate(day.date)}
+-                      >
+-                        <div className="flex flex-col">
+-                          <span className="text-xs">{day.day_name.substring(0, 3)}</span>
+-                          <span className="text-xs font-normal">
+-                            {formatDate(day.date)}
+-                            {isToday(day.date) && " (Hoje)"}
+-                          </span>
+-                        </div>
+-                      </Button>
+-                    ))}
++            <TabsContent value="daily" className="py-3">
++              {getSelectedDayData() ? (
++                <div className="space-y-4">
++                  <div className="flex items-center justify-between">
++                    <h3 className="text-base font-medium">
++                      {getSelectedDayData()?.day_name}, {formatDate(selectedDate)}
++                      {isToday(selectedDate) && <span className="ml-2 text-xs bg-primary/20 text-primary px-1 py-0.5 rounded">Hoje</span>}
++                    </h3>
++                    <div className="text-sm">
++                      <span className="font-medium">{getSelectedDayData()?.total_calories}</span> kcal
++                    </div>
+                   </div>
+                   
+-                  {/* Conteúdo do dia */}
+-                  {selectedDay && (
+-                    <div>
+-                      {/* Cabeçalho com resumo do dia */}
+-                      <div className="bg-slate-100 dark:bg-slate-800 rounded-lg p-3 mb-4">
+-                        <div className="flex justify-between items-center mb-1">
+-                          <h3 className="font-medium">
+-                            {selectedDay.day_name}, {formatDate(selectedDay.date)}
+-                            {isToday(selectedDay.date) && (
+-                              <span className="ml-1 text-xs bg-primary/20 text-primary px-1.5 py-0.5 rounded">
+-                                Hoje
+-                              </span>
+-                            )}
+-                          </h3>
+-                          <div className="flex items-center">
+-                            <Flame className="h-4 w-4 text-orange-500 mr-1" />
+-                            <span className="font-medium">{selectedDay.total_calories} kcal</span>
+-                          </div>
+-                        </div>
+-                        
+-                        {selectedDay.meal_count > 0 ? (
+-                          <>
+-                            <div className="grid grid-cols-3 gap-2 text-center text-sm">
+-                              <div>
+-                                <span className="font-medium">{selectedDay.total_protein}g</span>
+-                                <span className="text-xs text-slate-500 block">Proteína</span>
+-                              </div>
+-                              <div>
+-                                <span className="font-medium">{selectedDay.total_carbs}g</span>
+-                                <span className="text-xs text-slate-500 block">Carbos</span>
+-                              </div>
+-                              <div>
+-                                <span className="font-medium">{selectedDay.total_fat}g</span>
+-                                <span className="text-xs text-slate-500 block">Gordura</span>
+-                              </div>
+-                            </div>
+-                            
+-                            {/* Distribuição de macros */}
+-                            {renderMacroDistribution(
+-                              selectedDay.total_calories,
+-                              selectedDay.total_protein,
+-                              selectedDay.total_carbs,
+-                              selectedDay.total_fat
+-                            )}
+-                          </>
+-                        ) : (
+-                          <div className="text-center py-2 text-slate-500">
+-                            <span className="text-sm">Nenhuma refeição registrada</span>
+-                          </div>
+-                        )}
++                  {/* Distribuição de macronutrientes */}
++                  {getSelectedDayData()?.total_calories! > 0 && 
++                    renderMacroDistribution(
++                      getSelectedDayData()?.total_calories!,
++                      getSelectedDayData()?.total_protein!,
++                      getSelectedDayData()?.total_carbs!,
++                      getSelectedDayData()?.total_fat!
++                    )
++                  }
++                  
++                  {/* Lista de refeições */}
++                  {getSelectedDayData()?.meals && getSelectedDayData()?.meals.length! > 0 ? (
++                    <div className="divide-y divide-slate-200 dark:divide-slate-700">
++                      {getSelectedDayData()?.meals.map(meal => renderMeal(meal))}
++                    </div>
++                  ) : (
++                    <div className="flex flex-col items-center justify-center py-12 text-center">
++                      <div className="rounded-full bg-slate-100 dark:bg-slate-800 p-3 mb-2">
++                        <CircleOff className="h-6 w-6 text-slate-500" />
+                       </div>
+-                      
+-                      {/* Lista de refeições */}
+-                      {selectedDay.meal_count > 0 ? (
+-                        <div className="space-y-1">
+-                          <h4 className="text-sm font-medium mb-2">Refeições ({selectedDay.meal_count})</h4>
+-                          {selectedDay.meals.map(meal => renderMeal(meal))}
+-                        </div>
+-                      ) : (
+-                        <div className="text-center py-8 border rounded-lg">
+-                          <CircleOff className="h-8 w-8 mx-auto mb-2 text-slate-400" />
+-                          <p className="text-slate-500">Nenhuma refeição registrada neste dia</p>
+-                          <p className="text-sm text-slate-400">Use a análise de alimentos para registrar suas refeições</p>
+-                        </div>
+-                      )}
++                      <h3 className="text-base font-medium mb-1">Nenhuma refeição registrada</h3>
++                      <p className="text-sm text-slate-500 dark:text-slate-400">
++                        Não há refeições registradas para este dia
++                      </p>
+                     </div>
+                   )}
+-                </>
++                </div>
+               ) : (
+-                <div className="text-center py-8 border rounded-lg">
+-                  <UtensilsCrossed className="h-8 w-8 mx-auto mb-2 text-slate-400" />
+-                  <p className="text-slate-500">Nenhum histórico de refeições disponível</p>
+-                  <p className="text-sm text-slate-400">Use a análise de alimentos para começar a registrar suas refeições</p>
++                <div className="flex flex-col items-center justify-center py-12 text-center">
++                  <div className="rounded-full bg-slate-100 dark:bg-slate-800 p-3 mb-2">
++                    <CircleOff className="h-6 w-6 text-slate-500" />
++                  </div>
++                  <h3 className="text-base font-medium mb-1">Nenhum dia selecionado</h3>
++                  <p className="text-sm text-slate-500 dark:text-slate-400">
++                    Selecione um dia para ver as refeições
++                  </p>
+                 </div>
+               )}
+             </TabsContent>
+             
+-            <TabsContent value="overview" className="pt-4">
++            <TabsContent value="stats" className="py-3">
+               {nutritionStats && (
+-                <div className="space-y-4">
++                <div className="grid gap-4 md:grid-cols-2">
+                   {/* Estatísticas gerais */}
+                   <Card className="p-4">
+                     <h3 className="text-sm font-medium mb-3">Médias diárias</h3>
+                     
+                     {nutritionStats.daysWithMeals > 0 ? (
+                       <>
+-                        <div className="flex justify-between items-center mb-2">
+-                          <span className="text-sm">Calorias</span>
+-                          <span className="font-medium">{nutritionStats.avgCalories} kcal</span>
++                        <div className="flex justify-between text-xl mb-2">
++                          <span>Calorias</span>
++                          <span className="font-semibold">{nutritionStats.avgCalories}</span>
+                         </div>
+                         
+-                        <div className="grid grid-cols-3 gap-4 text-center">
+-                          <div>
+-                            <div className="text-sm font-medium">{nutritionStats.avgProtein}g</div>
+-                            <div className="text-xs text-slate-500">Proteína</div>
++                        <div className="grid grid-cols-3 gap-2 text-center py-2">
++                          <div className="bg-red-50 dark:bg-red-900/20 rounded p-2">
++                            <p className="font-semibold">{nutritionStats.avgProtein}g</p>
++                            <p className="text-xs text-slate-600 dark:text-slate-400">Proteínas</p>
+                           </div>
+-                          <div>
+-                            <div className="text-sm font-medium">{nutritionStats.avgCarbs}g</div>
+-                            <div className="text-xs text-slate-500">Carbos</div>
++                          <div className="bg-yellow-50 dark:bg-yellow-900/20 rounded p-2">
++                            <p className="font-semibold">{nutritionStats.avgCarbs}g</p>
++                            <p className="text-xs text-slate-600 dark:text-slate-400">Carboidratos</p>
+                           </div>
+-                          <div>
+-                            <div className="text-sm font-medium">{nutritionStats.avgFat}g</div>
+-                            <div className="text-xs text-slate-500">Gordura</div>
++                          <div className="bg-blue-50 dark:bg-blue-900/20 rounded p-2">
++                            <p className="font-semibold">{nutritionStats.avgFat}g</p>
++                            <p className="text-xs text-slate-600 dark:text-slate-400">Gorduras</p>
+                           </div>
+                         </div>
+                         
+-                        {/* Distribuição média de macros */}
+                         {renderMacroDistribution(
+                           nutritionStats.avgCalories,
+                           nutritionStats.avgProtein,
+diff --git a/src/index.css b/src/index.css
+index cab17c8..cd66d60 100644
+--- a/src/index.css
++++ b/src/index.css
+@@ -449,3 +449,45 @@ html, body {
+ .mobile-add-button {
+   @apply bg-blue-500 rounded-md p-1 text-white;
+ }
++
++/* Animação de pulsação para feedback durante processamento */
++@keyframes pulse-animation {
++  0% {
++    opacity: 1;
++    box-shadow: 0 0 0 0 rgba(0, 182, 148, 0.3);
++  }
++  70% {
++    opacity: 0.8;
++    box-shadow: 0 0 0 10px rgba(0, 182, 148, 0);
++  }
++  100% {
++    opacity: 1;
++    box-shadow: 0 0 0 0 rgba(0, 182, 148, 0);
++  }
++}
++
++.pulse-animation {
++  animation: pulse-animation 1.5s infinite;
++}
++
++/* Estilos para os painéis de valor nutricional */
++.nutrition-value-panel {
++  transition: all 0.3s ease;
++}
++
++.nutrition-value-panel[data-processing="true"] {
++  background-color: rgba(0, 182, 148, 0.1);
++}
++
++/* Estilos para as imagens de refeição no histórico */
++.meal-history-image {
++  width: 60px;
++  height: 60px;
++  object-fit: cover;
++  border-radius: 8px;
++  border: 1px solid rgba(0, 0, 0, 0.1);
++}
++
++.dark .meal-history-image {
++  border-color: rgba(255, 255, 255, 0.1);
++}
+diff --git a/src/services/foodAnalysisService_fixed.ts b/src/services/foodAnalysisService_fixed.ts
+index 0ccd4a3..181da85 100644
+--- a/src/services/foodAnalysisService_fixed.ts
++++ b/src/services/foodAnalysisService_fixed.ts
+@@ -114,13 +114,13 @@ async function analyzeImage(imageFile: File): Promise<FoodAnalysisResult> {
+       carbs: nutritionData.carbs || 0,
+       fat: nutritionData.fat || 0,
+       fiber: nutritionData.fiber || 0,
++      imageUrl: imageUrl, // Adicionar a URL da imagem para exibição no histórico
+       confidence: 0.9, // Valor padrão de confiança
+       foodItems: foodItems,
+       categories: nutritionData.categories || [],
+       healthScore: nutritionData.healthScore || calculateHealthScore(nutritionData),
+       dietaryTags: nutritionData.dietaryTags || [],
+-      userRecommendations: userRecommendations,
+-      imageUrl: imageUrl || '', // Garantir que temos pelo menos o preview como fallback
++      userRecommendations: userRecommendations
+     };
+     
+     console.log('Resultado final formatado:', JSON.stringify(result));
+diff --git a/src/services/mealAnalysisService.ts b/src/services/mealAnalysisService.ts
+index 0f3068d..77ee1e0 100644
+--- a/src/services/mealAnalysisService.ts
++++ b/src/services/mealAnalysisService.ts
+@@ -166,7 +166,7 @@ const analyzeWithOpenAIBase64 = async (
+     // Criar objeto de análise
+     const analysis: MealAnalysis = {
+       id: uuidv4(),
+-      imageUrl: imageUrl,
++      imageUrl: base64Image, // Salvar a imagem em base64 para exibir no histórico
+       foodName: foodName || 'Refeição',
+       description: analysisData.description,
+       nutrition: {
+diff --git a/src/services/openaiService.ts b/src/services/openaiService.ts
+index 883560c..ce8391e 100644
+--- a/src/services/openaiService.ts
++++ b/src/services/openaiService.ts
+@@ -65,41 +65,62 @@ export async function analyzeImageWithOpenAI(imageFile: File, analysisType: 'FOO
+     
+     // Definir o prompt base do sistema
+     const baseSystemPrompt = `
+-      Você é um nutricionista especializado em análise de imagens de alimentos.
+-      Analise esta imagem e identifique os alimentos presentes, estimando sua composição nutricional.
++      Você é um nutricionista especializado em análise detalhada de imagens de alimentos e pratos completos.
+       
+-      Sua resposta deve seguir estritamente este formato JSON:
+-      {
+-        "dishName": "nome do prato completo",
+-        "calories": número,
+-        "protein": número (gramas),
+-        "carbs": número (gramas),
+-        "fat": número (gramas),
+-        "fiber": número (gramas),
+-        "categories": ["categoria1", "categoria2"],
+-        "foodItems": [
++      IMPORTANTE: Sua tarefa é analisar TODOS os componentes do prato mostrado na imagem, não apenas um único alimento.
++      Identifique cada ingrediente visível e considere a refeição como um todo.
++      
++      Se você ver arroz, feijão, carne, salada ou qualquer outro componente, você DEVE mencionar TODOS eles.
++      O prato provavelmente contém múltiplos alimentos - certifique-se de listar cada um deles.
++      
++      NUNCA retorne apenas "arroz branco" ou qualquer outro item único quando há outros componentes visíveis.
++      Tenha cuidado especial para identificar carnes, vegetais, grãos e outros itens no mesmo prato.
++      
++      Estime a composição nutricional COMPLETA considerando TODOS os componentes visíveis.
++      
++      O nome do prato deve ser descritivo e incluir os principais componentes (ex: "Arroz com feijão, bife e salada").
++      
++      Sua resposta deve seguir estritamente este formato JSON abaixo, e deve incluir todos os componentes visíveis do prato:
+     `;
+ 
+     // Enriquecer o prompt com materiais de referência relevantes
+     const enrichedPrompt = await enrichPromptWithReferences(baseSystemPrompt, analysisType);
+     
++    // Adicionar o modelo de JSON como exemplo
++    const jsonExample = `{
++      "dishName": "nome do prato completo",
++      "calories": 500,
++      "protein": 25,
++      "carbs": 60,
++      "fat": 15,
++      "fiber": 8,
++      "categories": ["categoria1", "categoria2"],
++      "foodItems": [
++        {
++          "name": "nome do alimento em português",
++          "category": "categoria do alimento",
++          "calories": 200,
++          "portion": "porção estimada",
++          "protein": 10,
++          "carbs": 25,
++          "fat": 5
++        }
++      ],
++      "healthScore": 8,
++      "dietaryTags": ["tag1", "tag2"]
++    }`;
++    
+     // Adicionar o restante do prompt
+     const promptSuffix = `
+-          {
+-            "name": "nome do alimento em português",
+-            "category": "categoria do alimento",
+-            "calories": número,
+-            "portion": "porção estimada",
+-            "protein": número opcional,
+-            "carbs": número opcional,
+-            "fat": número opcional
+-          }
+-        ],
+-        "healthScore": número de 1 a 10,  // pontuação de saúde do prato (1 = menos saudável, 10 = mais saudável)
+-        "dietaryTags": ["tag1", "tag2"]  // tags como "vegano", "baixo carboidrato", "rico em proteínas", etc.
+-      }
+-      
+-      Responda APENAS com o JSON válido, sem explicações ou texto adicional.
++    Analise completamente a imagem e retorne um JSON válido similar ao exemplo abaixo, preenchendo com os valores corretos para o prato mostrado:
++
++    ${jsonExample}
++
++    ATENÇÃO: Sua resposta DEVE ser APENAS o JSON válido e nada mais. 
++    NÃO inclua explicações, comentários ou formatação fora do JSON.
++    NÃO use crases (\`\`\`) ou marcadores de código antes ou depois do JSON.
++    Comece sua resposta com '{' e termine com '}' sem nenhum texto adicional.
++    Isso é crucial para o processamento correto da resposta.
+     `;
+     
+     // Concatenar o prompt enriquecido com o sufixo
+@@ -124,18 +145,19 @@ export async function analyzeImageWithOpenAI(imageFile: File, analysisType: 'FOO
+           {
+             role: 'user',
+             content: [
+-              { type: 'text', text: 'Analise esta imagem de refeição e forneça informações nutricionais detalhadas.' },
+-              { 
+-                type: 'image_url', 
+-                image_url: { 
+-                  url: imageDataUrl 
+-                } 
++              {
++                type: 'text',
++                text: 'Analise completamente esta imagem de comida e forneça informações nutricionais detalhadas de TODOS os componentes visíveis no prato.'
++              },
++              {
++                type: 'image_url',
++                image_url: { url: imageDataUrl }
+               }
+             ]
+           }
+         ],
+-        temperature: 0.3,
+-        max_tokens: 1000,
++        max_tokens: 2000,
++        temperature: 0.1 // Reduzir temperatura para respostas mais consistentes
+       }),
+     });
+     
+@@ -158,35 +180,47 @@ export async function analyzeImageWithOpenAI(imageFile: File, analysisType: 'FOO
+     console.log('Resposta bruta da OpenAI (message.content):', nutritionDataText);
+     
+     try {
+-      console.log('Tentando processar a resposta da OpenAI...');
+-      // Processar a resposta JSON - primeiro tenta analisar diretamente
++      console.log('Processando resposta da OpenAI...');
++      // Processar a resposta JSON com tratamento robusto
+       let nutritionData;
+       
++      // Limpar a resposta de possíveis marcadores de código ou texto extra
++      let cleanedText = nutritionDataText.trim();
++      
++      // Remover marcadores de código markdown (```) se presentes
++      cleanedText = cleanedText.replace(/^```json\s*\n?|```\s*$/g, '');
++      
++      // Verificar se o texto começa e termina com chaves (indicando JSON)
++      if (!cleanedText.startsWith('{') || !cleanedText.endsWith('}')) {
++        console.log('Resposta não parece ser JSON puro. Tentando extrair...');
++        const jsonMatch = cleanedText.match(/\{[\s\S]*\}/m);
++        if (jsonMatch) {
++          cleanedText = jsonMatch[0];
++          console.log('JSON extraído de texto misto');
++        }
++      }
++      
+       try {
+-        // Tenta analisar diretamente o texto como JSON
+-        console.log('Tentando fazer parse do texto como JSON...');
+-        nutritionData = JSON.parse(nutritionDataText);
+-        console.log('Parse bem-sucedido! Dados JSON:', JSON.stringify(nutritionData, null, 2));
+-      } catch (initialJsonError) {
+-        console.error('Falha ao fazer parse direto do JSON:', initialJsonError);
+-        // Se falhar, tenta extrair JSON de texto que pode conter explicações
+-        console.log('Tentando extrair JSON de texto com explicações...');
++        // Tenta analisar o texto limpo como JSON
++        console.log('Tentando fazer parse do JSON...');
++        nutritionData = JSON.parse(cleanedText);
++        console.log('Parse bem-sucedido!');
++      } catch (jsonError) {
++        console.error('Erro no parse JSON:', jsonError);
+         
+-        // Procura por padrões de JSON na resposta
+-        console.log('Buscando padrão JSON na resposta...');
+-        const jsonMatch = nutritionDataText.match(/\{[\s\S]*\}/m);
+-        if (jsonMatch) {
+-          console.log('Padrão JSON encontrado:', jsonMatch[0]);
+-          try {
+-            nutritionData = JSON.parse(jsonMatch[0]);
+-            console.log('JSON extraído com sucesso de texto misto:', JSON.stringify(nutritionData, null, 2));
+-          } catch (extractError) {
+-            console.error('Erro ao extrair JSON de texto misto:', extractError);
+-            throw initialJsonError; // Se ainda falhar, lança o erro original
+-          }
+-        } else {
+-          console.error('Nenhum padrão JSON encontrado na resposta');
+-          throw initialJsonError; // Se não encontrar padrão JSON, lança o erro original
++        // Última tentativa: tentar corrigir problemas comuns de JSON
++        console.log('Tentando corrigir problemas comuns de JSON...');
++        // Corrigir aspas simples para aspas duplas
++        cleanedText = cleanedText.replace(/'/g, '"');
++        // Adicionar aspas duplas em chaves sem aspas
++        cleanedText = cleanedText.replace(/([{,])\s*(\w+)\s*:/g, '$1"$2":');
++        
++        try {
++          nutritionData = JSON.parse(cleanedText);
++          console.log('Parse bem-sucedido após correções!');
++        } catch (finalError) {
++          console.error('Falha final no parse JSON:', finalError, '\nTexto da resposta:', nutritionDataText);
++          throw new Error('Não foi possível processar a resposta da API. O formato não é um JSON válido.');
+         }
+       }
+       
+-- 
+2.47.1.windows.2
+
