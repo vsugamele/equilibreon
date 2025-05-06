@@ -39,9 +39,9 @@ export interface OpenAIAnalysisResponse {
 
 /**
  * Chave da API da OpenAI
- * Em produção, isso deveria estar em uma variável de ambiente ou em um serviço seguro
+ * Obtida da variável de ambiente
  */
-const OPENAI_API_KEY = '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';
+const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY;
 
 /**
  * Analisa uma imagem de alimento usando a API da OpenAI diretamente

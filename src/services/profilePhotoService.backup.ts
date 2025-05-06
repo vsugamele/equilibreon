@@ -74,8 +74,8 @@ export const uploadProgressPhoto = async (
     try {
       console.log('Iniciando análise de IA para a foto...');
       // Usar a API da OpenAI diretamente para análise de imagem
-      // Inicializar cliente OpenAI com a chave codificada
-      const apiKey = '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';
+      // Inicializar cliente OpenAI com a chave das variáveis de ambiente
+      const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
       
       // Usar o OpenAI que já foi importado no topo do arquivo
       const openai = new OpenAI({

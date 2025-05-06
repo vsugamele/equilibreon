@@ -70,8 +70,8 @@ export const analyzeExamWithAI = async (
   customApiKey?: string
 ): Promise<ExamAnalysisResult> => {
   try {
-    // Usando a mesma chave da OpenAI que funciona para análise de alimentos
-    const apiKey = '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';
+    // Usar a chave da OpenAI do ambiente
+    const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
     
     console.log('Usando chave da API OpenAI codificada no serviço');
     
