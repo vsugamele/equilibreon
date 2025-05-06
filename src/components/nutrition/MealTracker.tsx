@@ -222,13 +222,6 @@ const MealTracker: React.FC<MealTrackerProps> = ({ className }) => {
               <ImagePlus className="h-4 w-4" />
               <span className="hidden md:inline">Analisar</span>
             </Button>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={() => setShowInput(true)}
-            >
-              Adicionar
-            </Button>
           </div>
         </div>
 

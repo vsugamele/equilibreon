@@ -82,14 +82,44 @@ const MealAnalysisDialog: React.FC<MealAnalysisDialogProps> = ({
     
     setIsAnalyzing(true);
     
+    // Mostrar mensagem de processamento
+    toast.loading("Analisando sua refeição...", {
+      description: "Estamos identificando todos os componentes do seu prato. Isso pode levar alguns segundos.",
+      duration: 30000, // 30 segundos
+      id: "meal-analysis-toast"
+    });
+    
+    // Atualizar o painel de nutrição com efeito de processamento
+    const updateProcessingStatus = () => {
+      const nutritionBoxes = document.querySelectorAll('.nutrition-value-panel');
+      if (nutritionBoxes && nutritionBoxes.length > 0) {
+        nutritionBoxes.forEach(box => {
+          box.classList.add('pulse-animation');
+          box.setAttribute('data-processing', 'true');
+        });
+      }
+    };
+    
+    // Executar a animação de processamento
+    updateProcessingStatus();
+    
     try {
       const result = await analyzeMealImage(selectedFile, mealName);
       
       if (result) {
         setAnalysis(result);
+        toast.dismiss("meal-analysis-toast"); // Remover toast de carregamento
         toast.success("Análise concluída!", {
-          description: "Confira os detalhes nutricionais da sua refeição"
+          description: "Identificamos todos os componentes do seu prato. Confira os detalhes nutricionais."
         });
+        
+        // Adicionar as calorias ao painel principal imediatamente
+        if (onMealConfirmed && result) {
+          // Preparar objeto para notificar componente pai
+          const confirmedAnalysis = { ...result, confirmed: true };
+          // Chamar callback com análise confirmada
+          setTimeout(() => onMealConfirmed(confirmedAnalysis), 500);
+        }
       } else {
         toast.error("Falha na análise", {
           description: "Não foi possível analisar esta imagem. Tente outra foto."
@@ -97,11 +127,21 @@ const MealAnalysisDialog: React.FC<MealAnalysisDialogProps> = ({
       }
     } catch (error) {
       console.error('Erro ao analisar refeição:', error);
-      toast.error("Erro", {
-        description: "Ocorreu um erro durante a análise. Tente novamente."
+      toast.dismiss("meal-analysis-toast"); // Remover toast de carregamento
+      toast.error("Erro na análise", {
+        description: "Não conseguimos analisar completamente sua refeição. Tente uma foto com melhor iluminação e ângulo."
       });
     } finally {
       setIsAnalyzing(false);
+      
+      // Remover efeito de processamento
+      const nutritionBoxes = document.querySelectorAll('.nutrition-value-panel');
+      if (nutritionBoxes && nutritionBoxes.length > 0) {
+        nutritionBoxes.forEach(box => {
+          box.classList.remove('pulse-animation');
+          box.removeAttribute('data-processing');
+        });
+      }
     }
   };
   

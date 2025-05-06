@@ -166,7 +166,7 @@ const analyzeWithOpenAIBase64 = async (
     // Criar objeto de análise
     const analysis: MealAnalysis = {
       id: uuidv4(),
-      imageUrl: imageUrl,
+      imageUrl: base64Image, // Salvar a imagem em base64 para exibir no histórico
       foodName: foodName || 'Refeição',
       description: analysisData.description,
       nutrition: {

@@ -65,41 +65,62 @@ export async function analyzeImageWithOpenAI(imageFile: File, analysisType: 'FOO
     
     // Definir o prompt base do sistema
     const baseSystemPrompt = `
-      Você é um nutricionista especializado em análise de imagens de alimentos.
-      Analise esta imagem e identifique os alimentos presentes, estimando sua composição nutricional.
+      Você é um nutricionista especializado em análise detalhada de imagens de alimentos e pratos completos.
       
-      Sua resposta deve seguir estritamente este formato JSON:
-      {
-        "dishName": "nome do prato completo",
-        "calories": número,
-        "protein": número (gramas),
-        "carbs": número (gramas),
-        "fat": número (gramas),
-        "fiber": número (gramas),
-        "categories": ["categoria1", "categoria2"],
-        "foodItems": [
+      IMPORTANTE: Sua tarefa é analisar TODOS os componentes do prato mostrado na imagem, não apenas um único alimento.
+      Identifique cada ingrediente visível e considere a refeição como um todo.
+      
+      Se você ver arroz, feijão, carne, salada ou qualquer outro componente, você DEVE mencionar TODOS eles.
+      O prato provavelmente contém múltiplos alimentos - certifique-se de listar cada um deles.
+      
+      NUNCA retorne apenas "arroz branco" ou qualquer outro item único quando há outros componentes visíveis.
+      Tenha cuidado especial para identificar carnes, vegetais, grãos e outros itens no mesmo prato.
+      
+      Estime a composição nutricional COMPLETA considerando TODOS os componentes visíveis.
+      
+      O nome do prato deve ser descritivo e incluir os principais componentes (ex: "Arroz com feijão, bife e salada").
+      
+      Sua resposta deve seguir estritamente este formato JSON abaixo, e deve incluir todos os componentes visíveis do prato:
     `;
 
     // Enriquecer o prompt com materiais de referência relevantes
     const enrichedPrompt = await enrichPromptWithReferences(baseSystemPrompt, analysisType);
     
+    // Adicionar o modelo de JSON como exemplo
+    const jsonExample = `{
+      "dishName": "nome do prato completo",
+      "calories": 500,
+      "protein": 25,
+      "carbs": 60,
+      "fat": 15,
+      "fiber": 8,
+      "categories": ["categoria1", "categoria2"],
+      "foodItems": [
+        {
+          "name": "nome do alimento em português",
+          "category": "categoria do alimento",
+          "calories": 200,
+          "portion": "porção estimada",
+          "protein": 10,
+          "carbs": 25,
+          "fat": 5
+        }
+      ],
+      "healthScore": 8,
+      "dietaryTags": ["tag1", "tag2"]
+    }`;
+    
     // Adicionar o restante do prompt
     const promptSuffix = `
-          {
-            "name": "nome do alimento em português",
-            "category": "categoria do alimento",
-            "calories": número,
-            "portion": "porção estimada",
-            "protein": número opcional,
-            "carbs": número opcional,
-            "fat": número opcional
-          }
-        ],
-        "healthScore": número de 1 a 10,  // pontuação de saúde do prato (1 = menos saudável, 10 = mais saudável)
-        "dietaryTags": ["tag1", "tag2"]  // tags como "vegano", "baixo carboidrato", "rico em proteínas", etc.
-      }
-      
-      Responda APENAS com o JSON válido, sem explicações ou texto adicional.
+    Analise completamente a imagem e retorne um JSON válido similar ao exemplo abaixo, preenchendo com os valores corretos para o prato mostrado:
+
+    ${jsonExample}
+
+    ATENÇÃO: Sua resposta DEVE ser APENAS o JSON válido e nada mais. 
+    NÃO inclua explicações, comentários ou formatação fora do JSON.
+    NÃO use crases (\`\`\`) ou marcadores de código antes ou depois do JSON.
+    Comece sua resposta com '{' e termine com '}' sem nenhum texto adicional.
+    Isso é crucial para o processamento correto da resposta.
     `;
     
     // Concatenar o prompt enriquecido com o sufixo
@@ -124,18 +145,19 @@ export async function analyzeImageWithOpenAI(imageFile: File, analysisType: 'FOO
           {
             role: 'user',
             content: [
-              { type: 'text', text: 'Analise esta imagem de refeição e forneça informações nutricionais detalhadas.' },
-              { 
-                type: 'image_url', 
-                image_url: { 
-                  url: imageDataUrl 
-                } 
+              {
+                type: 'text',
+                text: 'Analise completamente esta imagem de comida e forneça informações nutricionais detalhadas de TODOS os componentes visíveis no prato.'
+              },
+              {
+                type: 'image_url',
+                image_url: { url: imageDataUrl }
               }
             ]
           }
         ],
-        temperature: 0.3,
-        max_tokens: 1000,
+        max_tokens: 2000,
+        temperature: 0.1 // Reduzir temperatura para respostas mais consistentes
       }),
     });
     
@@ -158,35 +180,47 @@ export async function analyzeImageWithOpenAI(imageFile: File, analysisType: 'FOO
     console.log('Resposta bruta da OpenAI (message.content):', nutritionDataText);
     
     try {
-      console.log('Tentando processar a resposta da OpenAI...');
-      // Processar a resposta JSON - primeiro tenta analisar diretamente
+      console.log('Processando resposta da OpenAI...');
+      // Processar a resposta JSON com tratamento robusto
       let nutritionData;
       
-      try {
-        // Tenta analisar diretamente o texto como JSON
-        console.log('Tentando fazer parse do texto como JSON...');
-        nutritionData = JSON.parse(nutritionDataText);
-        console.log('Parse bem-sucedido! Dados JSON:', JSON.stringify(nutritionData, null, 2));
-      } catch (initialJsonError) {
-        console.error('Falha ao fazer parse direto do JSON:', initialJsonError);
-        // Se falhar, tenta extrair JSON de texto que pode conter explicações
-        console.log('Tentando extrair JSON de texto com explicações...');
-        
-        // Procura por padrões de JSON na resposta
-        console.log('Buscando padrão JSON na resposta...');
-        const jsonMatch = nutritionDataText.match(/\{[\s\S]*\}/m);
+      // Limpar a resposta de possíveis marcadores de código ou texto extra
+      let cleanedText = nutritionDataText.trim();
+      
+      // Remover marcadores de código markdown (```) se presentes
+      cleanedText = cleanedText.replace(/^```json\s*\n?|```\s*$/g, '');
+      
+      // Verificar se o texto começa e termina com chaves (indicando JSON)
+      if (!cleanedText.startsWith('{') || !cleanedText.endsWith('}')) {
+        console.log('Resposta não parece ser JSON puro. Tentando extrair...');
+        const jsonMatch = cleanedText.match(/\{[\s\S]*\}/m);
         if (jsonMatch) {
-          console.log('Padrão JSON encontrado:', jsonMatch[0]);
-          try {
-            nutritionData = JSON.parse(jsonMatch[0]);
-            console.log('JSON extraído com sucesso de texto misto:', JSON.stringify(nutritionData, null, 2));
-          } catch (extractError) {
-            console.error('Erro ao extrair JSON de texto misto:', extractError);
-            throw initialJsonError; // Se ainda falhar, lança o erro original
-          }
-        } else {
-          console.error('Nenhum padrão JSON encontrado na resposta');
-          throw initialJsonError; // Se não encontrar padrão JSON, lança o erro original
+          cleanedText = jsonMatch[0];
+          console.log('JSON extraído de texto misto');
+        }
+      }
+      
+      try {
+        // Tenta analisar o texto limpo como JSON
+        console.log('Tentando fazer parse do JSON...');
+        nutritionData = JSON.parse(cleanedText);
+        console.log('Parse bem-sucedido!');
+      } catch (jsonError) {
+        console.error('Erro no parse JSON:', jsonError);
+        
+        // Última tentativa: tentar corrigir problemas comuns de JSON
+        console.log('Tentando corrigir problemas comuns de JSON...');
+        // Corrigir aspas simples para aspas duplas
+        cleanedText = cleanedText.replace(/'/g, '"');
+        // Adicionar aspas duplas em chaves sem aspas
+        cleanedText = cleanedText.replace(/([{,])\s*(\w+)\s*:/g, '$1"$2":');
+        
+        try {
+          nutritionData = JSON.parse(cleanedText);
+          console.log('Parse bem-sucedido após correções!');
+        } catch (finalError) {
+          console.error('Falha final no parse JSON:', finalError, '\nTexto da resposta:', nutritionDataText);
+          throw new Error('Não foi possível processar a resposta da API. O formato não é um JSON válido.');
         }
       }
       

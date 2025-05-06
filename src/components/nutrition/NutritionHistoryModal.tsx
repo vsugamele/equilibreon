@@ -143,219 +143,184 @@ const NutritionHistoryModal: React.FC<NutritionHistoryModalProps> = ({
     });
     
     return (
-      <div key={meal.id} className="border rounded-lg p-3 mb-3 last:mb-0">
-        <div className="flex justify-between items-start">
-          <div>
-            <div className="flex items-center gap-1">
-              <span className="font-medium">{mealTypeNames[meal.meal_type] || 'Refeição'}</span>
-              <span className="text-sm text-slate-500">{mealTime}</span>
+      <div key={meal.id} className="border-b border-slate-200 dark:border-slate-700 last:border-0 py-3">
+        <div className="flex justify-between items-start mb-2">
+          {/* Lado esquerdo com imagem (se disponível) */}
+          <div className="flex items-start gap-3">
+            {/* Imagem da refeição */}
+            {meal.photo_url ? (
+              <div className="flex-shrink-0">
+                <img 
+                  src={meal.photo_url} 
+                  alt={meal.description}
+                  className="meal-history-image"
+                  loading="lazy"
+                  onError={(e) => {
+                    const img = e.target as HTMLImageElement;
+                    img.style.display = 'none'; // Esconder imagem quebrada
+                  }}
+                />
+              </div>
+            ) : (
+              <div className="flex-shrink-0 w-[60px] h-[60px] bg-slate-100 dark:bg-slate-800 rounded-lg flex items-center justify-center">
+                <UtensilsCrossed className="h-5 w-5 text-slate-400" />
+              </div>
+            )}
+            
+            {/* Nome e horário */}
+            <div>
+              <h4 className="font-medium dark:text-slate-100">{meal.description}</h4>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{mealTime}</p>
             </div>
-            <p className="text-sm mt-1">{meal.description}</p>
           </div>
-          {meal.photo_url && (
-            <div className="w-16 h-16 rounded-md overflow-hidden flex-shrink-0">
-              <img 
-                src={meal.photo_url} 
-                alt={meal.description}
-                className="w-full h-full object-cover"
-              />
-            </div>
-          )}
+          
+          <div className="text-right">
+            <p className="text-sm font-semibold dark:text-slate-100">{meal.calories} kcal</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              P: {meal.protein}g | C: {meal.carbs}g | G: {meal.fat}g
+            </p>
+          </div>
         </div>
         
-        <div className="grid grid-cols-4 gap-2 mt-2 text-center">
-          <div>
-            <div className="text-sm font-medium">{meal.calories}</div>
-            <div className="text-xs text-slate-500">kcal</div>
+        <div className="grid grid-cols-4 gap-1 text-xs text-center">
+          <div className="py-1 px-2 bg-red-100 dark:bg-red-900/30 rounded nutrition-value-panel">
+            <p className="font-medium dark:text-red-400">{Math.round((meal.protein * 4 / meal.calories) * 100)}%</p>
+            <p className="text-slate-600 dark:text-slate-500">Proteína</p>
           </div>
-          <div>
-            <div className="text-sm font-medium">{meal.protein}g</div>
-            <div className="text-xs text-slate-500">Proteína</div>
+          <div className="py-1 px-2 bg-yellow-100 dark:bg-yellow-900/30 rounded nutrition-value-panel">
+            <p className="font-medium dark:text-yellow-400">{Math.round((meal.carbs * 4 / meal.calories) * 100)}%</p>
+            <p className="text-slate-600 dark:text-slate-500">Carboidratos</p>
           </div>
-          <div>
-            <div className="text-sm font-medium">{meal.carbs}g</div>
-            <div className="text-xs text-slate-500">Carbos</div>
+          <div className="py-1 px-2 bg-blue-100 dark:bg-blue-900/30 rounded nutrition-value-panel">
+            <p className="font-medium dark:text-blue-400">{Math.round((meal.fat * 9 / meal.calories) * 100)}%</p>
+            <p className="text-slate-600 dark:text-slate-500">Gorduras</p>
           </div>
-          <div>
-            <div className="text-sm font-medium">{meal.fat}g</div>
-            <div className="text-xs text-slate-500">Gordura</div>
+          <div className="py-1 px-2 bg-green-100 dark:bg-green-900/30 rounded nutrition-value-panel">
+            <p className="font-medium dark:text-green-400">--</p>
+            <p className="text-slate-600 dark:text-slate-500">Fibras</p>
           </div>
         </div>
-        
-        {meal.foods && meal.foods.length > 0 && (
-          <div className="mt-2 text-xs text-slate-500">
-            {meal.foods.join(', ')}
-          </div>
+
+        {meal.notes && (
+          <p className="mt-2 text-xs italic text-slate-500 dark:text-slate-400">
+            {meal.notes}
+          </p>
         )}
       </div>
     );
   };
-  
-  const selectedDay = getSelectedDayData();
-  
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[550px] max-h-[80vh] overflow-y-auto">
+      <DialogContent className="w-full max-w-4xl">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <UtensilsCrossed className="h-5 w-5 text-primary" />
-            Histórico de Nutrição
-          </DialogTitle>
+          <DialogTitle>Histórico de Nutrição</DialogTitle>
           <DialogDescription>
-            Seu registro de refeições nos últimos 7 dias
+            Análise e histórico das suas refeições e nutrição
           </DialogDescription>
         </DialogHeader>
         
         {loading ? (
-          <div className="space-y-4 py-4">
-            <Skeleton className="h-8 w-full" />
-            <Skeleton className="h-20 w-full" />
-            <Skeleton className="h-20 w-full" />
+          <div className="space-y-3">
+            <Skeleton className="h-24 w-full rounded-md" />
+            <Skeleton className="h-32 w-full rounded-md" />
+            <Skeleton className="h-24 w-full rounded-md" />
           </div>
         ) : (
-          <Tabs defaultValue="daily" className="mt-4">
+          <Tabs defaultValue="daily">
             <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="daily">
-                <CalendarDays className="h-4 w-4 mr-2" />
-                Diário
+              <TabsTrigger value="daily" className="flex items-center gap-2">
+                <CalendarDays className="h-4 w-4" />
+                <span>Refeições por dia</span>
               </TabsTrigger>
-              <TabsTrigger value="overview">
-                <TrendingUp className="h-4 w-4 mr-2" />
-                Visão Geral
+              <TabsTrigger value="stats" className="flex items-center gap-2">
+                <TrendingUp className="h-4 w-4" />
+                <span>Estatísticas</span>
               </TabsTrigger>
             </TabsList>
             
-            <TabsContent value="daily" className="pt-4">
-              {nutritionHistory.length > 0 ? (
-                <>
-                  {/* Seletor de data */}
-                  <div className="flex items-center space-x-1 overflow-x-auto pb-2 mb-4 scrollbar-none">
-                    {nutritionHistory.map((day) => (
-                      <Button
-                        key={day.date}
-                        variant={selectedDate === day.date ? "default" : "outline"}
-                        className="min-w-[85px] flex-shrink-0"
-                        size="sm"
-                        onClick={() => setSelectedDate(day.date)}
-                      >
-                        <div className="flex flex-col">
-                          <span className="text-xs">{day.day_name.substring(0, 3)}</span>
-                          <span className="text-xs font-normal">
-                            {formatDate(day.date)}
-                            {isToday(day.date) && " (Hoje)"}
-                          </span>
-                        </div>
-                      </Button>
-                    ))}
+            <TabsContent value="daily" className="py-3">
+              {getSelectedDayData() ? (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-base font-medium">
+                      {getSelectedDayData()?.day_name}, {formatDate(selectedDate)}
+                      {isToday(selectedDate) && <span className="ml-2 text-xs bg-primary/20 text-primary px-1 py-0.5 rounded">Hoje</span>}
+                    </h3>
+                    <div className="text-sm">
+                      <span className="font-medium">{getSelectedDayData()?.total_calories}</span> kcal
+                    </div>
                   </div>
                   
-                  {/* Conteúdo do dia */}
-                  {selectedDay && (
-                    <div>
-                      {/* Cabeçalho com resumo do dia */}
-                      <div className="bg-slate-100 dark:bg-slate-800 rounded-lg p-3 mb-4">
-                        <div className="flex justify-between items-center mb-1">
-                          <h3 className="font-medium">
-                            {selectedDay.day_name}, {formatDate(selectedDay.date)}
-                            {isToday(selectedDay.date) && (
-                              <span className="ml-1 text-xs bg-primary/20 text-primary px-1.5 py-0.5 rounded">
-                                Hoje
-                              </span>
-                            )}
-                          </h3>
-                          <div className="flex items-center">
-                            <Flame className="h-4 w-4 text-orange-500 mr-1" />
-                            <span className="font-medium">{selectedDay.total_calories} kcal</span>
-                          </div>
-                        </div>
-                        
-                        {selectedDay.meal_count > 0 ? (
-                          <>
-                            <div className="grid grid-cols-3 gap-2 text-center text-sm">
-                              <div>
-                                <span className="font-medium">{selectedDay.total_protein}g</span>
-                                <span className="text-xs text-slate-500 block">Proteína</span>
-                              </div>
-                              <div>
-                                <span className="font-medium">{selectedDay.total_carbs}g</span>
-                                <span className="text-xs text-slate-500 block">Carbos</span>
-                              </div>
-                              <div>
-                                <span className="font-medium">{selectedDay.total_fat}g</span>
-                                <span className="text-xs text-slate-500 block">Gordura</span>
-                              </div>
-                            </div>
-                            
-                            {/* Distribuição de macros */}
-                            {renderMacroDistribution(
-                              selectedDay.total_calories,
-                              selectedDay.total_protein,
-                              selectedDay.total_carbs,
-                              selectedDay.total_fat
-                            )}
-                          </>
-                        ) : (
-                          <div className="text-center py-2 text-slate-500">
-                            <span className="text-sm">Nenhuma refeição registrada</span>
-                          </div>
-                        )}
+                  {/* Distribuição de macronutrientes */}
+                  {getSelectedDayData()?.total_calories! > 0 && 
+                    renderMacroDistribution(
+                      getSelectedDayData()?.total_calories!,
+                      getSelectedDayData()?.total_protein!,
+                      getSelectedDayData()?.total_carbs!,
+                      getSelectedDayData()?.total_fat!
+                    )
+                  }
+                  
+                  {/* Lista de refeições */}
+                  {getSelectedDayData()?.meals && getSelectedDayData()?.meals.length! > 0 ? (
+                    <div className="divide-y divide-slate-200 dark:divide-slate-700">
+                      {getSelectedDayData()?.meals.map(meal => renderMeal(meal))}
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-12 text-center">
+                      <div className="rounded-full bg-slate-100 dark:bg-slate-800 p-3 mb-2">
+                        <CircleOff className="h-6 w-6 text-slate-500" />
                       </div>
-                      
-                      {/* Lista de refeições */}
-                      {selectedDay.meal_count > 0 ? (
-                        <div className="space-y-1">
-                          <h4 className="text-sm font-medium mb-2">Refeições ({selectedDay.meal_count})</h4>
-                          {selectedDay.meals.map(meal => renderMeal(meal))}
-                        </div>
-                      ) : (
-                        <div className="text-center py-8 border rounded-lg">
-                          <CircleOff className="h-8 w-8 mx-auto mb-2 text-slate-400" />
-                          <p className="text-slate-500">Nenhuma refeição registrada neste dia</p>
-                          <p className="text-sm text-slate-400">Use a análise de alimentos para registrar suas refeições</p>
-                        </div>
-                      )}
+                      <h3 className="text-base font-medium mb-1">Nenhuma refeição registrada</h3>
+                      <p className="text-sm text-slate-500 dark:text-slate-400">
+                        Não há refeições registradas para este dia
+                      </p>
                     </div>
                   )}
-                </>
+                </div>
               ) : (
-                <div className="text-center py-8 border rounded-lg">
-                  <UtensilsCrossed className="h-8 w-8 mx-auto mb-2 text-slate-400" />
-                  <p className="text-slate-500">Nenhum histórico de refeições disponível</p>
-                  <p className="text-sm text-slate-400">Use a análise de alimentos para começar a registrar suas refeições</p>
+                <div className="flex flex-col items-center justify-center py-12 text-center">
+                  <div className="rounded-full bg-slate-100 dark:bg-slate-800 p-3 mb-2">
+                    <CircleOff className="h-6 w-6 text-slate-500" />
+                  </div>
+                  <h3 className="text-base font-medium mb-1">Nenhum dia selecionado</h3>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">
+                    Selecione um dia para ver as refeições
+                  </p>
                 </div>
               )}
             </TabsContent>
             
-            <TabsContent value="overview" className="pt-4">
+            <TabsContent value="stats" className="py-3">
               {nutritionStats && (
-                <div className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-2">
                   {/* Estatísticas gerais */}
                   <Card className="p-4">
                     <h3 className="text-sm font-medium mb-3">Médias diárias</h3>
                     
                     {nutritionStats.daysWithMeals > 0 ? (
                       <>
-                        <div className="flex justify-between items-center mb-2">
-                          <span className="text-sm">Calorias</span>
-                          <span className="font-medium">{nutritionStats.avgCalories} kcal</span>
+                        <div className="flex justify-between text-xl mb-2">
+                          <span>Calorias</span>
+                          <span className="font-semibold">{nutritionStats.avgCalories}</span>
                         </div>
                         
-                        <div className="grid grid-cols-3 gap-4 text-center">
-                          <div>
-                            <div className="text-sm font-medium">{nutritionStats.avgProtein}g</div>
-                            <div className="text-xs text-slate-500">Proteína</div>
+                        <div className="grid grid-cols-3 gap-2 text-center py-2">
+                          <div className="bg-red-50 dark:bg-red-900/20 rounded p-2">
+                            <p className="font-semibold">{nutritionStats.avgProtein}g</p>
+                            <p className="text-xs text-slate-600 dark:text-slate-400">Proteínas</p>
                           </div>
-                          <div>
-                            <div className="text-sm font-medium">{nutritionStats.avgCarbs}g</div>
-                            <div className="text-xs text-slate-500">Carbos</div>
+                          <div className="bg-yellow-50 dark:bg-yellow-900/20 rounded p-2">
+                            <p className="font-semibold">{nutritionStats.avgCarbs}g</p>
+                            <p className="text-xs text-slate-600 dark:text-slate-400">Carboidratos</p>
                           </div>
-                          <div>
-                            <div className="text-sm font-medium">{nutritionStats.avgFat}g</div>
-                            <div className="text-xs text-slate-500">Gordura</div>
+                          <div className="bg-blue-50 dark:bg-blue-900/20 rounded p-2">
+                            <p className="font-semibold">{nutritionStats.avgFat}g</p>
+                            <p className="text-xs text-slate-600 dark:text-slate-400">Gorduras</p>
                           </div>
                         </div>
                         
-                        {/* Distribuição média de macros */}
                         {renderMacroDistribution(
                           nutritionStats.avgCalories,
                           nutritionStats.avgProtein,

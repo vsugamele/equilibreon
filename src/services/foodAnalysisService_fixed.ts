@@ -114,13 +114,13 @@ async function analyzeImage(imageFile: File): Promise<FoodAnalysisResult> {
       carbs: nutritionData.carbs || 0,
       fat: nutritionData.fat || 0,
       fiber: nutritionData.fiber || 0,
+      imageUrl: imageUrl, // Adicionar a URL da imagem para exibição no histórico
       confidence: 0.9, // Valor padrão de confiança
       foodItems: foodItems,
       categories: nutritionData.categories || [],
       healthScore: nutritionData.healthScore || calculateHealthScore(nutritionData),
       dietaryTags: nutritionData.dietaryTags || [],
-      userRecommendations: userRecommendations,
-      imageUrl: imageUrl || '', // Garantir que temos pelo menos o preview como fallback
+      userRecommendations: userRecommendations
     };
     
     console.log('Resultado final formatado:', JSON.stringify(result));
