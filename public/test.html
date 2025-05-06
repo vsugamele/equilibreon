@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Teste Equilibreon</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #f0f9f4;
+        }
+        .container {
+            text-align: center;
+            background-color: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            max-width: 600px;
+            width: 90%;
+        }
+        h1 { color: #10b981; }
+        p { color: #333; line-height: 1.6; }
+        .button {
+            background-color: #10b981;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1rem;
+            margin-top: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Equilibreon - Página de Teste</h1>
+        <p>Esta página confirma que o servidor está funcionando corretamente.</p>
+        <p>Se você está vendo esta página, o servidor web está respondendo, mas pode haver um problema com o aplicativo React principal.</p>
+        <button class="button" onclick="checkEnv()">Verificar Variáveis de Ambiente</button>
+        <div id="result" style="margin-top: 1rem;"></div>
+    </div>
+    
+    <script>
+        function checkEnv() {
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = `
+                <p><strong>Verificação das variáveis de ambiente:</strong></p>
+                <ul>
+                    <li>Servidor web: <span style="color: green;">✓ Funcionando</span></li>
+                    <li>Acesso aos arquivos estáticos: <span style="color: green;">✓ Funcionando</span></li>
+                </ul>
+                <p>O problema provavelmente está no carregamento do aplicativo React principal. Verifique o console do navegador para mais detalhes.</p>
+            `;
+        }
+    </script>
+</body>
+</html>

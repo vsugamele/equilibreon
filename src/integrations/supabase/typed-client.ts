@@ -1,8 +1,12 @@
 import { createClient } from '@supabase/supabase-js';
 import { Database } from '../../types/supabase';
+import { supabaseConfig } from './config';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+// Usar valores explícitos da configuração em vez de variáveis de ambiente
+const supabaseUrl = supabaseConfig.supabaseUrl;
+const supabaseAnonKey = supabaseConfig.supabaseKey;
+
+console.log('Inicializando Supabase com:', { supabaseUrl });
 
 export const supabaseTyped = createClient<Database>(
   supabaseUrl,
