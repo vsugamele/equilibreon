@@ -1,5 +1,7 @@
+import axios from 'axios';
 import { supabase } from '@/integrations/supabase/client';
 import OpenAI from 'openai';
+import { openaiConfig } from '../integrations/supabase/config';
 import { Json } from '@/types/supabase';
 import { getUserContextData, formatUserContextForPrompt, UserContextData } from '@/services/userContextService';
 import { enrichPromptWithReferences } from './referenceLibraryService';
@@ -70,8 +72,10 @@ export const analyzeExamWithAI = async (
   customApiKey?: string
 ): Promise<ExamAnalysisResult> => {
   try {
-    // Usar a chave da OpenAI do ambiente
-    const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
+    // Usar a chave da OpenAI da configuração explícita
+    const apiKey = openaiConfig.apiKey;
+    
+    console.log('ExamAnalysis: OpenAI API Key configurada:', !!apiKey);
     
     console.log('Usando chave da API OpenAI codificada no serviço');
     

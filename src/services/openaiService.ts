@@ -39,9 +39,12 @@ export interface OpenAIAnalysisResponse {
 
 /**
  * Chave da API da OpenAI
- * Obtida da variável de ambiente
+ * Obtida da configuração explícita
  */
-const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY;
+import { openaiConfig } from '../integrations/supabase/config';
+const OPENAI_API_KEY = openaiConfig.apiKey;
+
+console.log('OpenAI API Key configurada:', !!OPENAI_API_KEY);
 
 /**
  * Analisa uma imagem de alimento usando a API da OpenAI diretamente
