@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDF Processor</title>
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.4.120/build/pdf.min.js"></script>
+  <style>
+    body { 
+      font-family: system-ui, -apple-system, sans-serif;
+      margin: 20px;
+      background-color: #f8f9fa;
+    }
+    #status {
+      margin: 20px 0;
+      padding: 15px;
+      border-radius: 5px;
+      background-color: #e9ecef;
+    }
+    #output {
+      white-space: pre-wrap;
+      background-color: white;
+      padding: 20px;
+      border-radius: 5px;
+      border: 1px solid #dee2e6;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    #dropArea {
+      border: 2px dashed #0d6efd;
+      border-radius: 5px;
+      padding: 25px;
+      text-align: center;
+      margin: 20px 0;
+      background-color: #e7f1ff;
+      cursor: pointer;
+    }
+    #dropArea.highlight {
+      background-color: #bbdefb;
+    }
+    button {
+      background-color: #0d6efd;
+      color: white;
+      border: none;
+      padding: 10px 15px;
+      border-radius: 5px;
+      cursor: pointer;
+      margin: 5px;
+    }
+    button:hover {
+      background-color: #0b5ed7;
+    }
+    input[type="file"] {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <h1>Processador de PDF Avançado</h1>
+  
+  <div id="dropArea">
+    <p>Arraste e solte um arquivo PDF aqui ou clique para selecionar</p>
+    <input type="file" id="fileInput" accept=".pdf,.txt">
+  </div>
+  
+  <div id="status">Aguardando arquivo...</div>
+  
+  <div id="controls">
+    <button id="copyBtn" disabled>Copiar Texto</button>
+    <button id="downloadBtn" disabled>Baixar como TXT</button>
+  </div>
+  
+  <h2>Texto Extraído:</h2>
+  <pre id="output"></pre>
+
+  <script>
+    // Configurando o worker do PDF.js
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.4.120/build/pdf.worker.min.js';
+    
+    let extractedText = '';
+    const statusEl = document.getElementById('status');
+    const outputEl = document.getElementById('output');
+    const dropArea = document.getElementById('dropArea');
+    const fileInput = document.getElementById('fileInput');
+    const copyBtn = document.getElementById('copyBtn');
+    const downloadBtn = document.getElementById('downloadBtn');
+    
+    // Configuração da área de arrastar e soltar
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+      dropArea.addEventListener(eventName, preventDefaults, false);
+    });
+    
+    function preventDefaults(e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    
+    ['dragenter', 'dragover'].forEach(eventName => {
+      dropArea.addEventListener(eventName, highlight, false);
+    });
+    
+    ['dragleave', 'drop'].forEach(eventName => {
+      dropArea.addEventListener(eventName, unhighlight, false);
+    });
+    
+    function highlight() {
+      dropArea.classList.add('highlight');
+    }
+    
+    function unhighlight() {
+      dropArea.classList.remove('highlight');
+    }
+    
+    dropArea.addEventListener('drop', handleDrop, false);
+    dropArea.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', handleFile);
+    
+    function handleDrop(e) {
+      const dt = e.dataTransfer;
+      const files = dt.files;
+      handleFiles(files);
+    }
+    
+    function handleFile(e) {
+      const files = e.target.files;
+      handleFiles(files);
+    }
+    
+    function handleFiles(files) {
+      if (files.length > 0) {
+        const file = files[0];
+        processFile(file);
+      }
+    }
+    
+    async function processFile(file) {
+      statusEl.textContent = `Processando: ${file.name}...`;
+      outputEl.textContent = '';
+      extractedText = '';
+      
+      try {
+        if (file.type === 'application/pdf') {
+          await processPDF(file);
+        } else {
+          await processText(file);
+        }
+        
+        copyBtn.disabled = false;
+        downloadBtn.disabled = false;
+        
+        // Enviar mensagem para o componente React
+        window.parent.postMessage({
+          type: 'pdf-processed',
+          content: extractedText,
+          filename: file.name
+        }, '*');
+        
+      } catch (error) {
+        console.error('Erro ao processar arquivo:', error);
+        statusEl.textContent = `Erro ao processar ${file.name}: ${error.message}`;
+      }
+    }
+    
+    async function processPDF(file) {
+      try {
+        statusEl.textContent = 'Extraindo texto do PDF...';
+        
+        // Ler o arquivo como ArrayBuffer
+        const arrayBuffer = await readFileAsArrayBuffer(file);
+        
+        // Carregar o documento PDF
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        const numPages = pdf.numPages;
+        
+        statusEl.textContent = `Extraindo texto de ${numPages} páginas...`;
+        
+        // Extrair texto de cada página
+        let fullText = '';
+        for (let i = 1; i <= numPages; i++) {
+          statusEl.textContent = `Processando página ${i} de ${numPages}...`;
+          const page = await pdf.getPage(i);
+          const textContent = await page.getTextContent();
+          
+          // Combinando items de texto com espaços
+          const pageText = textContent.items
+            .map(item => item.str)
+            .join(' ');
+            
+          fullText += pageText + '\n\n';
+        }
+        
+        // Limpar e mostrar o texto
+        extractedText = fullText
+          .replace(/\s+/g, ' ')
+          .trim();
+          
+        outputEl.textContent = extractedText;
+        statusEl.textContent = `PDF processado com sucesso! Extraídos ${extractedText.length} caracteres.`;
+      } catch (error) {
+        console.error('Erro no processamento do PDF:', error);
+        statusEl.textContent = 'Erro ao processar o PDF. Tente outro arquivo.';
+        throw error;
+      }
+    }
+    
+    async function processText(file) {
+      try {
+        statusEl.textContent = 'Lendo arquivo de texto...';
+        
+        // Ler arquivo como texto
+        const text = await readFileAsText(file);
+        extractedText = text.trim();
+        outputEl.textContent = extractedText;
+        
+        statusEl.textContent = `Arquivo de texto processado! ${extractedText.length} caracteres.`;
+      } catch (error) {
+        console.error('Erro ao ler arquivo de texto:', error);
+        statusEl.textContent = 'Erro ao ler o arquivo de texto.';
+        throw error;
+      }
+    }
+    
+    function readFileAsArrayBuffer(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result);
+        reader.onerror = (e) => reject(new Error('Erro ao ler arquivo como ArrayBuffer'));
+        reader.readAsArrayBuffer(file);
+      });
+    }
+    
+    function readFileAsText(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result);
+        reader.onerror = (e) => reject(new Error('Erro ao ler arquivo como texto'));
+        reader.readAsText(file);
+      });
+    }
+    
+    // Botões de ação
+    copyBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(extractedText)
+        .then(() => {
+          const originalText = copyBtn.textContent;
+          copyBtn.textContent = 'Copiado!';
+          setTimeout(() => {
+            copyBtn.textContent = originalText;
+          }, 2000);
+        })
+        .catch(err => {
+          console.error('Erro ao copiar texto: ', err);
+        });
+    });
+    
+    downloadBtn.addEventListener('click', () => {
+      const blob = new Blob([extractedText], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'texto_extraido.txt';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+
+project_id = "tkbivipqiewkfnhktmqq"
+[[functions]]
+name = "nutrition-ai"
+verify_jwt = true
+[[functions]]
+name = "interpret-exam"
+verify_jwt = true
+[[functions]]
+name = "analyze-progress"
+verify_jwt = true
+[[functions]]
+name = "integrated-health-analysis"
+verify_jwt = true

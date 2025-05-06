@@ -1,0 +1,1211 @@
+import React, { useEffect, useState } from 'react';
+import Navbar from '@/components/layout/Navbar';
+import Footer from '@/components/layout/Footer';
+import MobileNavbar from '@/components/layout/MobileNavbar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Link } from 'react-router-dom';
+import { User, Bell, FileText, Camera, Pill, Settings, LogOut, PenSquare } from 'lucide-react';
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from '@/hooks/use-toast';
+import { Skeleton } from '@/components/ui/skeleton';
+import EditProfileForm from '@/components/profile/EditProfileForm';
+import AvatarUpload from '@/components/profile/AvatarUpload';
+import BasicInfoForm from '@/components/profile/BasicInfoForm';
+import AddressForm from '@/components/profile/AddressForm';
+
+interface UserProfile {
+  id?: string;
+  email?: string;
+  nome?: string;
+  telefone?: string;
+  objetivo?: string;
+  created_at?: string;
+  updated_at?: string;
+  address?: string;
+  neighborhood?: string;
+  city?: string;
+  state?: string;
+  zip_code?: string;
+  avatar_url?: string | null; // Mantido para compatibilidade com código existente
+  onboarding_data?: any; // Campo JSON que armazena dados flexíveis, incluindo avatar_url
+  
+  // Dados físicos do onboarding
+  age?: string;
+  gender?: string;
+  height?: string;
+  weight?: string;
+  
+  // Dados de saúde do onboarding
+  activity_level?: string;
+  sleep_quality?: string;
+  stress_level?: string;
+  sun_exposure?: string;
+  
+  // Categorias de saúde e nutrição do onboarding
+  health_issues?: string[];
+  dietary_restrictions?: string[];
+  secondary_goals?: string[];
+  supplements?: string[];
+  health_concerns?: string[];
+  
+  // Campos de texto para formulários
+  healthConditionsText?: string;
+  healthConcernsText?: string;
+  dietaryRestrictionsText?: string;
+  supplementsText?: string;
+  supplementsFrequency?: string;
+  secondaryGoalsText?: string;
+  physicalActivityType?: string;
+  physicalActivityFrequency?: string;
+  desiredExercise?: string;
+}
+
+const ProfilePage = () => {
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [authUser, setAuthUser] = useState<any>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [avatarKey, setAvatarKey] = useState(Date.now());
+  const [editingBasicInfo, setEditingBasicInfo] = useState(false);
+  const [editingAddress, setEditingAddress] = useState(false);
+  const { toast } = useToast();
+
+  // Função para buscar dados do perfil incluindo dados do onboarding
+  const fetchProfile = async (userId: string) => {
+    try {
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+      
+      if (profileError) {
+        console.error('Erro ao buscar perfil:', profileError);
+        setLoading(false);
+        return null;
+      }
+      
+      // Cria uma versão enriquecida do perfil com dados adicionais
+      const enrichedProfile = { ...profileData } as UserProfile;
+      
+      // Se temos dados de onboarding, extrair e preencher campos que possam estar faltando
+      if (profileData && profileData.onboarding_data) {
+        console.log('Dados do onboarding encontrados:', profileData.onboarding_data);
+        const onboardingData = typeof profileData.onboarding_data === 'string'
+          ? JSON.parse(profileData.onboarding_data)
+          : profileData.onboarding_data;
+        
+        // Preencher campos básicos se estiverem ausentes no perfil
+        if (!enrichedProfile.nome && onboardingData.name) {
+          enrichedProfile.nome = onboardingData.name;
+        }
+        if (!enrichedProfile.telefone && onboardingData.phone) {
+          enrichedProfile.telefone = onboardingData.phone;
+        }
+        if (!enrichedProfile.objetivo && onboardingData.selectedGoals && Array.isArray(onboardingData.selectedGoals) && onboardingData.selectedGoals.length > 0) {
+          enrichedProfile.objetivo = onboardingData.selectedGoals.join(', ');
+        }
+        
+        // Dados físicos
+        if (onboardingData.age) enrichedProfile.age = onboardingData.age.toString();
+        if (onboardingData.height) enrichedProfile.height = onboardingData.height.toString();
+        if (onboardingData.weight) enrichedProfile.weight = onboardingData.weight.toString();
+        if (onboardingData.gender) enrichedProfile.gender = onboardingData.gender;
+        
+        // Atividade física
+        if (onboardingData.activityLevel) enrichedProfile.activity_level = onboardingData.activityLevel;
+        
+          // Preparar os textos originais para uso nos textareas
+          console.log('Extraindo textos originais do onboarding...');
+          
+          // 1. Problemas de Saúde - texto original
+          if (onboardingData.healthConditionsText) {
+            enrichedProfile.healthConditionsText = onboardingData.healthConditionsText;
+            console.log('Condições de saúde (texto):', onboardingData.healthConditionsText);
+          } else if (onboardingData.healthConditions) {
+            const conditions = Array.isArray(onboardingData.healthConditions) 
+              ? onboardingData.healthConditions 
+              : [onboardingData.healthConditions];
+            enrichedProfile.healthConditionsText = conditions.join(', ');
+            enrichedProfile.health_issues = conditions;
+            console.log('Condições de saúde (array):', conditions);
+          }
+          
+          // 2. Preocupações com Saúde
+          if (onboardingData.healthConcernsText) {
+            enrichedProfile.healthConcernsText = onboardingData.healthConcernsText;
+            console.log('Preocupações de saúde (texto):', onboardingData.healthConcernsText);
+          } else if (onboardingData.healthConcerns) {
+            const concerns = Array.isArray(onboardingData.healthConcerns)
+              ? onboardingData.healthConcerns
+              : [onboardingData.healthConcerns];
+            enrichedProfile.healthConcernsText = concerns.join(', ');
+            enrichedProfile.health_concerns = concerns;
+            console.log('Preocupações de saúde (array):', concerns);
+          }
+          
+          // 3. Suplementos
+          if (onboardingData.supplementsText) {
+            enrichedProfile.supplementsText = onboardingData.supplementsText;
+            console.log('Suplementos (texto):', onboardingData.supplementsText);
+          } else if (onboardingData.supplements) {
+            const supplements = Array.isArray(onboardingData.supplements)
+              ? onboardingData.supplements
+              : [onboardingData.supplements];
+            enrichedProfile.supplementsText = supplements.join(', ');
+            enrichedProfile.supplements = supplements;
+            console.log('Suplementos (array):', supplements);
+          }
+          
+          // 4. Frequência de Suplementos
+          if (onboardingData.supplementsFrequency) {
+            enrichedProfile.supplementsFrequency = onboardingData.supplementsFrequency;
+            console.log('Frequência de suplementos:', onboardingData.supplementsFrequency);
+          }
+          
+          // 5. Restrições Alimentares
+          if (onboardingData.dietaryRestrictionsText) {
+            enrichedProfile.dietaryRestrictionsText = onboardingData.dietaryRestrictionsText;
+            console.log('Restrições alimentares (texto):', onboardingData.dietaryRestrictionsText);
+          } else if (onboardingData.dietaryRestrictions) {
+            const restrictions = Array.isArray(onboardingData.dietaryRestrictions)
+              ? onboardingData.dietaryRestrictions
+              : [onboardingData.dietaryRestrictions];
+            enrichedProfile.dietaryRestrictionsText = restrictions.join(', ');
+            enrichedProfile.dietary_restrictions = restrictions;
+            console.log('Restrições alimentares (array):', restrictions);
+          }
+          
+          // 6. Objetivos Secundários
+          if (onboardingData.secondaryGoalsText) {
+            enrichedProfile.secondaryGoalsText = onboardingData.secondaryGoalsText;
+            console.log('Objetivos secundários (texto):', onboardingData.secondaryGoalsText);
+          } else if (onboardingData.secondaryGoals) {
+            const goals = Array.isArray(onboardingData.secondaryGoals)
+              ? onboardingData.secondaryGoals
+              : [onboardingData.secondaryGoals];
+            enrichedProfile.secondaryGoalsText = goals.join(', ');
+            enrichedProfile.secondary_goals = goals;
+            console.log('Objetivos secundários (array):', goals);
+          }
+          
+          // 7. Atividade Física - Valores em texto puro
+          if (onboardingData.physicalActivityType) {
+            enrichedProfile.physicalActivityType = onboardingData.physicalActivityType;
+            console.log('Tipo de atividade física:', onboardingData.physicalActivityType);
+          }
+          
+          if (onboardingData.physicalActivityFrequency) {
+            enrichedProfile.physicalActivityFrequency = onboardingData.physicalActivityFrequency;
+            console.log('Frequência de atividade física:', onboardingData.physicalActivityFrequency);
+          }
+          
+          if (onboardingData.desiredExercise) {
+            enrichedProfile.desiredExercise = onboardingData.desiredExercise;
+            console.log('Exercício desejado:', onboardingData.desiredExercise);
+          }
+        
+        // 1. Problemas de Saúde - pega direto do campo de texto ou dos checkboxes
+        if (onboardingData.healthConditionsText) {
+          enrichedProfile.healthConditionsText = onboardingData.healthConditionsText;
+          console.log('Condições de saúde (texto):', onboardingData.healthConditionsText);
+        } else if (onboardingData.healthConditions) {
+          const conditions = Array.isArray(onboardingData.healthConditions) 
+            ? onboardingData.healthConditions 
+            : [onboardingData.healthConditions];
+          enrichedProfile.healthConditionsText = conditions.join(', ');
+          enrichedProfile.health_issues = conditions;
+          console.log('Condições de saúde (array):', conditions);
+        }
+        
+        // 2. Preocupações com Saúde
+        if (onboardingData.healthConcernsText) {
+          enrichedProfile.healthConcernsText = onboardingData.healthConcernsText;
+          console.log('Preocupações de saúde (texto):', onboardingData.healthConcernsText);
+        } else if (onboardingData.healthConcerns) {
+          const concerns = Array.isArray(onboardingData.healthConcerns)
+            ? onboardingData.healthConcerns
+            : [onboardingData.healthConcerns];
+          enrichedProfile.healthConcernsText = concerns.join(', ');
+          enrichedProfile.health_concerns = concerns;
+          console.log('Preocupações de saúde (array):', concerns);
+        }
+        
+        // 3. Suplementos
+        if (onboardingData.supplementsText) {
+          enrichedProfile.supplementsText = onboardingData.supplementsText;
+          console.log('Suplementos (texto):', onboardingData.supplementsText);
+        } else if (onboardingData.supplements) {
+          const supplements = Array.isArray(onboardingData.supplements)
+            ? onboardingData.supplements
+            : [onboardingData.supplements];
+          enrichedProfile.supplementsText = supplements.join(', ');
+          enrichedProfile.supplements = supplements;
+          console.log('Suplementos (array):', supplements);
+        }
+        
+        // 4. Frequência de Suplementos
+        if (onboardingData.supplementsFrequency) {
+          enrichedProfile.supplementsFrequency = onboardingData.supplementsFrequency;
+          console.log('Frequência de suplementos:', onboardingData.supplementsFrequency);
+        }
+        
+        // 5. Restrições Alimentares
+        if (onboardingData.dietaryRestrictionsText) {
+          enrichedProfile.dietaryRestrictionsText = onboardingData.dietaryRestrictionsText;
+          console.log('Restrições alimentares (texto):', onboardingData.dietaryRestrictionsText);
+        } else if (onboardingData.dietaryRestrictions) {
+          const restrictions = Array.isArray(onboardingData.dietaryRestrictions)
+            ? onboardingData.dietaryRestrictions
+            : [onboardingData.dietaryRestrictions];
+          enrichedProfile.dietaryRestrictionsText = restrictions.join(', ');
+          enrichedProfile.dietary_restrictions = restrictions;
+          console.log('Restrições alimentares (array):', restrictions);
+        }
+        
+        // 6. Objetivos Secundários
+        if (onboardingData.secondaryGoalsText) {
+          enrichedProfile.secondaryGoalsText = onboardingData.secondaryGoalsText;
+          console.log('Objetivos secundários (texto):', onboardingData.secondaryGoalsText);
+        } else if (onboardingData.secondaryGoals) {
+          const goals = Array.isArray(onboardingData.secondaryGoals)
+            ? onboardingData.secondaryGoals
+            : [onboardingData.secondaryGoals];
+          enrichedProfile.secondaryGoalsText = goals.join(', ');
+          enrichedProfile.secondary_goals = goals;
+          console.log('Objetivos secundários (array):', goals);
+        }
+        
+        // 7. Atividade Física - Valores em texto puro
+        if (onboardingData.physicalActivityType) {
+          enrichedProfile.physicalActivityType = onboardingData.physicalActivityType;
+          console.log('Tipo de atividade física:', onboardingData.physicalActivityType);
+        }
+        
+        if (onboardingData.physicalActivityFrequency) {
+          enrichedProfile.physicalActivityFrequency = onboardingData.physicalActivityFrequency;
+          console.log('Frequência de atividade física:', onboardingData.physicalActivityFrequency);
+        }
+        
+        if (onboardingData.desiredExercise) {
+          enrichedProfile.desiredExercise = onboardingData.desiredExercise;
+          console.log('Exercício desejado:', onboardingData.desiredExercise);
+        }
+      }
+
+      // Atualizar o avatar_url do perfil enriquecido, se disponível no onboarding_data
+      if (profileData?.onboarding_data?.avatar_url) {
+        enrichedProfile.avatar_url = profileData.onboarding_data.avatar_url;
+      }
+      
+      console.log('Perfil enriquecido completo:', enrichedProfile);
+      setProfile(enrichedProfile);
+      setLoading(false);
+    } catch (error) {
+      console.error('Erro inesperado ao buscar perfil:', error);
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchProfile();
+  }, []);
+
+  // Restante do código...
+          console.log('Dados completos do onboarding:', JSON.stringify(onboardingData, null, 2));
+          
+          // Inicializar arrays vazios (importante para evitar erros em checkboxes)
+          enrichedProfile.health_issues = [];
+          enrichedProfile.dietary_restrictions = [];
+          enrichedProfile.secondary_goals = [];
+          enrichedProfile.supplements = [];
+          enrichedProfile.health_concerns = [];
+          
+          // 1. Extrair problemas de saúde se existirem
+          if (onboardingData.healthIssues && Array.isArray(onboardingData.healthIssues)) {
+            console.log('Encontrado healthIssues:', onboardingData.healthIssues);
+            // Mapear para IDs reconhecidos pelo formulário
+            enrichedProfile.health_issues = onboardingData.healthIssues.map(issue => {
+              if (typeof issue === 'string') {
+                // Lista de mapeamentos possíveis
+                const issueMap: Record<string, string> = {
+                  'diabetes': 'diabetes',
+                  'hipertensao': 'hypertension',
+                  'hipertensão': 'hypertension',
+                  'doenca_cardiaca': 'heart_disease',
+                  'doenca cardiaca': 'heart_disease',
+                  'doença cardíaca': 'heart_disease',
+                  'tireoide': 'thyroid',
+                  'problema respiratorio': 'respiratory',
+                  'problema respiratório': 'respiratory',
+                  'dor articulacoes': 'joint_pain',
+                  'dor nas articulações': 'joint_pain',
+                  'colesterol alto': 'cholesterol',
+                  'colesterol': 'cholesterol'
+                };
+                
+                // Tentar encontrar um mapeamento, ou usar o valor original se não encontrar
+                const lowercaseIssue = issue.toLowerCase();
+                for (const [key, value] of Object.entries(issueMap)) {
+                  if (lowercaseIssue.includes(key)) {
+                    return value;
+                  }
+                }
+              }
+              return issue; // Manter o original se não houver correspondência
+            });
+          }
+          
+          // 2. Extrair restrições alimentares se existirem
+          if (onboardingData.dietaryRestrictions && Array.isArray(onboardingData.dietaryRestrictions)) {
+            console.log('Encontrado dietaryRestrictions:', onboardingData.dietaryRestrictions);
+            // Mapear para IDs reconhecidos pelo formulário
+            enrichedProfile.dietary_restrictions = onboardingData.dietaryRestrictions.map(restriction => {
+              if (typeof restriction === 'string') {
+                // Lista de mapeamentos possíveis
+                const restrictionMap: Record<string, string> = {
+                  'sem gluten': 'gluten',
+                  'sem glúten': 'gluten',
+                  'sem lactose': 'lactose',
+                  'vegetariano': 'vegetarian',
+                  'vegano': 'vegan',
+                  'cetogenica': 'keto',
+                  'cetogênica': 'keto',
+                  'paleolitica': 'paleo',
+                  'paleolítica': 'paleo'
+                };
+                
+                // Tentar encontrar um mapeamento, ou usar o valor original se não encontrar
+                const lowercaseRestriction = restriction.toLowerCase();
+                for (const [key, value] of Object.entries(restrictionMap)) {
+                  if (lowercaseRestriction.includes(key)) {
+                    return value;
+                  }
+                }
+              }
+              return restriction; // Manter o original se não houver correspondência
+            });
+          }
+          
+          // 3. Extrair objetivos secundários ou usar os objetivos principais como secundários
+          if (onboardingData.secondaryGoals && Array.isArray(onboardingData.secondaryGoals)) {
+            console.log('Encontrado secondaryGoals:', onboardingData.secondaryGoals);
+            // Mapear para IDs reconhecidos pelo formulário
+            enrichedProfile.secondary_goals = onboardingData.secondaryGoals.map(goal => {
+              if (typeof goal === 'string') {
+                // Lista de mapeamentos possíveis
+                const goalMap: Record<string, string> = {
+                  'perda de peso': 'weight_loss',
+                  'emagrecimento': 'weight_loss',
+                  'ganho de massa': 'muscle_gain',
+                  'musculação': 'muscle_gain',
+                  'aumento de resistencia': 'endurance',
+                  'aumento de resistência': 'endurance',
+                  'flexibilidade': 'flexibility',
+                  'saude geral': 'health',
+                  'saúde geral': 'health',
+                  'reducao de estresse': 'stress_reduction',
+                  'redução de estresse': 'stress_reduction'
+                };
+                
+                // Tentar encontrar um mapeamento, ou usar o valor original se não encontrar
+                const lowercaseGoal = goal.toLowerCase();
+                for (const [key, value] of Object.entries(goalMap)) {
+                  if (lowercaseGoal.includes(key)) {
+                    return value;
+                  }
+                }
+              }
+              return goal; // Manter o original se não houver correspondência
+            });
+          } else if (onboardingData.selectedGoals && Array.isArray(onboardingData.selectedGoals)) {
+            // Usar objetivos principais como secundários se não houver secundários definidos
+            console.log('Usando selectedGoals como objetivos secundários:', onboardingData.selectedGoals);
+            enrichedProfile.secondary_goals = onboardingData.selectedGoals.map(goal => {
+              if (typeof goal === 'string') {
+                // Lista de mapeamentos possíveis
+                const goalMap: Record<string, string> = {
+                  'Perda de Peso': 'weight_loss',
+                  'Ganho de Massa Muscular': 'muscle_gain',
+                  'Aumento de Resistência': 'endurance',
+                  'Flexibilidade': 'flexibility',
+                  'Saúde Geral': 'health',
+                  'Redução de Estresse': 'stress_reduction'
+                };
+                
+                // Verificar correspondência direta ou converter para snake_case
+                return goalMap[goal] || goal.toLowerCase().replace(/ /g, '_');
+              }
+              return goal; // Manter o original se não for string
+            });
+          }
+          
+          // 4. Extrair suplementos se existirem
+          if (onboardingData.supplements && Array.isArray(onboardingData.supplements)) {
+            console.log('Encontrado supplements:', onboardingData.supplements);
+            // Mapear para IDs reconhecidos pelo formulário
+            enrichedProfile.supplements = onboardingData.supplements.map(supplement => {
+              if (typeof supplement === 'string') {
+                // Lista de mapeamentos possíveis
+                const supplementMap: Record<string, string> = {
+                  'proteina': 'protein',
+                  'proteína': 'protein',
+                  'creatina': 'creatine',
+                  'bcaa': 'bcaa',
+                  'vitamina d': 'vitamin_d',
+                  'omega 3': 'omega3',
+                  'ômega 3': 'omega3',
+                  'magnesio': 'magnesium',
+                  'magnésio': 'magnesium'
+                };
+                
+                // Tentar encontrar um mapeamento, ou usar o valor original se não encontrar
+                const lowercaseSupplement = supplement.toLowerCase();
+                for (const [key, value] of Object.entries(supplementMap)) {
+                  if (lowercaseSupplement.includes(key)) {
+                    return value;
+                  }
+                }
+              }
+              return supplement; // Manter o original se não houver correspondência
+            });
+          }
+          
+          // 5. Extrair preocupações com saúde se existirem
+          if (onboardingData.healthConcerns && Array.isArray(onboardingData.healthConcerns)) {
+            console.log('Encontrado healthConcerns:', onboardingData.healthConcerns);
+            // Mapear para IDs reconhecidos pelo formulário
+            enrichedProfile.health_concerns = onboardingData.healthConcerns.map(concern => {
+              if (typeof concern === 'string') {
+                // Lista de mapeamentos possíveis
+                const concernMap: Record<string, string> = {
+                  'falta de energia': 'energy',
+                  'problemas de sono': 'sleep',
+                  'estresse': 'stress',
+                  'digestao': 'digestion',
+                  'digestão': 'digestion',
+                  'imunidade': 'immunity',
+                  'concentracao': 'focus',
+                  'concentração': 'focus'
+                };
+                
+                // Tentar encontrar um mapeamento, ou usar o valor original se não encontrar
+                const lowercaseConcern = concern.toLowerCase();
+                for (const [key, value] of Object.entries(concernMap)) {
+                  if (lowercaseConcern.includes(key)) {
+                    return value;
+                  }
+                }
+              }
+              return concern; // Manter o original se não houver correspondência
+            });
+          }
+          
+          console.log('Valores REAIS extraídos do onboarding:');
+          console.log('- health_issues:', enrichedProfile.health_issues);
+          console.log('- dietary_restrictions:', enrichedProfile.dietary_restrictions);
+          console.log('- secondary_goals:', enrichedProfile.secondary_goals);
+          console.log('- supplements:', enrichedProfile.supplements);
+          console.log('- health_concerns:', enrichedProfile.health_concerns);
+          console.log("Perfil enriquecido com dados do onboarding:", enrichedProfile);
+        } catch (err) {
+          console.error("Erro ao processar dados do onboarding:", err);
+          // Continuar com o perfil original se houver erro no processamento
+        }
+          // Adicionar outros campos
+          if (onboardingData.healthConditionsText) {
+            enrichedProfile.healthConditionsText = onboardingData.healthConditionsText;
+          } else if (onboardingData.healthConditions) {
+            const conditions = Array.isArray(onboardingData.healthConditions) 
+              ? onboardingData.healthConditions 
+              : [onboardingData.healthConditions];
+            enrichedProfile.healthConditionsText = conditions.join(', ');
+          }
+          
+          if (onboardingData.healthConcernsText) {
+            enrichedProfile.healthConcernsText = onboardingData.healthConcernsText;
+          } else if (onboardingData.healthConcerns) {
+            const concerns = Array.isArray(onboardingData.healthConcerns)
+              ? onboardingData.healthConcerns
+              : [onboardingData.healthConcerns];
+            enrichedProfile.healthConcernsText = concerns.join(', ');
+          }
+          
+          if (onboardingData.supplementsText) {
+            enrichedProfile.supplementsText = onboardingData.supplementsText;
+          } else if (onboardingData.supplements) {
+            const supplements = Array.isArray(onboardingData.supplements)
+              ? onboardingData.supplements
+              : [onboardingData.supplements];
+            enrichedProfile.supplementsText = supplements.join(', ');
+          }
+          
+          if (onboardingData.supplementsFrequency) {
+            enrichedProfile.supplementsFrequency = onboardingData.supplementsFrequency;
+          }
+          
+          if (onboardingData.dietaryRestrictionsText) {
+            enrichedProfile.dietaryRestrictionsText = onboardingData.dietaryRestrictionsText;
+          } else if (onboardingData.dietaryRestrictions) {
+            const restrictions = Array.isArray(onboardingData.dietaryRestrictions)
+              ? onboardingData.dietaryRestrictions
+              : [onboardingData.dietaryRestrictions];
+            enrichedProfile.dietaryRestrictionsText = restrictions.join(', ');
+          }
+          
+          if (onboardingData.secondaryGoalsText) {
+            enrichedProfile.secondaryGoalsText = onboardingData.secondaryGoalsText;
+          } else if (onboardingData.secondaryGoals) {
+            const goals = Array.isArray(onboardingData.secondaryGoals)
+              ? onboardingData.secondaryGoals
+              : [onboardingData.secondaryGoals];
+            enrichedProfile.secondaryGoalsText = goals.join(', ');
+          }
+
+          // Atualizar o avatar_url do perfil enriquecido se disponível
+          if (onboardingData.avatar_url) {
+            enrichedProfile.avatar_url = onboardingData.avatar_url;
+          }
+
+          console.log('Perfil enriquecido com dados do onboarding:', enrichedProfile);
+        } catch (err) {
+          console.error("Erro ao processar dados do onboarding:", err);
+          // Continuar com o perfil original se houver erro no processamento
+        }
+      }
+      
+      console.log('Perfil enriquecido final:', enrichedProfile);
+      return enrichedProfile;
+    } catch (error) {
+      console.error("Erro ao buscar perfil:", error);
+      return null;
+    }
+  };
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      setLoading(true);
+      
+      try {
+        const { data: { user }, error } = await supabase.auth.getUser();
+        
+        if (error || !user) {
+          console.error("Erro de autenticação:", error);
+          toast({
+            title: "Erro de autenticação",
+            description: "Você precisa estar logado para acessar esta página",
+            variant: "destructive",
+          });
+          
+          setTimeout(() => {
+            window.location.href = '/login';
+          }, 2000);
+          
+          return;
+        }
+        
+        setAuthUser(user);
+        
+        const profileData = await fetchProfile(user.id);
+        
+        if (!profileData) {
+          const newProfile: UserProfile = {
+            id: user.id,
+            email: user.email || '',
+            nome: user.user_metadata?.name || '',
+            avatar_url: user.user_metadata?.avatar_url || null,
+          };
+          
+          // Garantir que newProfile tenha o campo id como obrigatório
+          // e que esteja usando o tipo correto esperado pelo Supabase
+          const profileToInsert = {
+            id: user.id, // ID é obrigatório
+            nome: newProfile.nome,
+            email: newProfile.email,
+            onboarding_data: {},
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          };
+          
+          const { error: insertError } = await supabase
+            .from('profiles')
+            .insert(profileToInsert);
+          
+          if (insertError) {
+            console.error("Erro ao criar perfil:", insertError);
+          } else {
+            setProfile(newProfile);
+          }
+        } else {
+          setProfile(profileData);
+        }
+      } catch (error) {
+
+        // 1. Extrair problemas de saúde
+        if (onboardingData.healthIssues && Array.isArray(onboardingData.healthIssues)) {
+          console.log('Encontrado healthIssues:', onboardingData.healthIssues);
+          // Mapear para IDs reconhecidos pelo formulário
+          profileData.health_issues = onboardingData.healthIssues.map(issue => {
+            if (typeof issue === 'string') {
+              // Lista de mapeamentos possíveis
+              const issueMap: Record<string, string> = {
+                'doenças cardíacas': 'heart_disease',
+                'diabetes': 'diabetes',
+                'hipertensão': 'hypertension',
+                'problemas de saúde mental': 'mental_health',
+                'outros': 'others'
+              };
+              
+              // Tentar encontrar um mapeamento, ou usar o valor original se não encontrar
+              const lowercaseIssue = issue.toLowerCase();
+              for (const [key, value] of Object.entries(issueMap)) {
+                if (lowercaseIssue.includes(key)) {
+                  return value;
+                }
+              }
+            }
+            return issue; // Manter o original se não houver correspondência
+          });
+        }
+
+        // 2. Extrair restrições alimentares
+        if (onboardingData.dietaryRestrictions && Array.isArray(onboardingData.dietaryRestrictions)) {
+          console.log('Encontrado dietaryRestrictions:', onboardingData.dietaryRestrictions);
+          // Mapear para IDs reconhecidos pelo formulário
+          profileData.dietary_restrictions = onboardingData.dietaryRestrictions.map(restriction => {
+            if (typeof restriction === 'string') {
+              // Lista de mapeamentos possíveis
+              const restrictionMap: Record<string, string> = {
+                'vegetariano': 'vegetarian',
+                'vegano': 'vegan',
+                'glúten-free': 'gluten_free',
+                'lactose-free': 'lactose_free',
+                'outros': 'others'
+              };
+              
+              // Tentar encontrar um mapeamento, ou usar o valor original se não encontrar
+              const lowercaseRestriction = restriction.toLowerCase();
+              for (const [key, value] of Object.entries(restrictionMap)) {
+                if (lowercaseRestriction.includes(key)) {
+                  return value;
+                }
+              }
+            }
+            return restriction; // Manter o original se não houver correspondência
+          });
+        }
+
+        // 3. Extrair objetivos secundários
+        if (onboardingData.secondaryGoals && Array.isArray(onboardingData.secondaryGoals)) {
+          console.log('Encontrado secondaryGoals:', onboardingData.secondaryGoals);
+          // Mapear para IDs reconhecidos pelo formulário
+          profileData.secondary_goals = onboardingData.secondaryGoals.map(goal => {
+            if (typeof goal === 'string') {
+              // Lista de mapeamentos possíveis
+              const goalMap: Record<string, string> = {
+                'perda de peso': 'weight_loss',
+                'emagrecimento': 'weight_loss',
+                'ganho de massa': 'muscle_gain',
+                'musculação': 'muscle_gain',
+                'aumento de resistencia': 'endurance',
+                'aumento de resistência': 'endurance',
+                'flexibilidade': 'flexibility',
+                'saude geral': 'health',
+                'saúde geral': 'health',
+                'reducao de estresse': 'stress_reduction',
+                'redução de estresse': 'stress_reduction'
+              };
+              
+              // Tentar encontrar um mapeamento, ou usar o valor original se não encontrar
+              const lowercaseGoal = goal.toLowerCase();
+              for (const [key, value] of Object.entries(goalMap)) {
+                if (lowercaseGoal.includes(key)) {
+                  return value;
+                }
+              }
+            }
+            return goal; // Manter o original se não houver correspondência
+          });
+        } else if (onboardingData.selectedGoals && Array.isArray(onboardingData.selectedGoals)) {
+          // Usar objetivos principais como secundários se não houver secundários definidos
+          console.log('Usando selectedGoals como objetivos secundários:', onboardingData.selectedGoals);
+          profileData.secondary_goals = onboardingData.selectedGoals.map(goal => {
+            if (typeof goal === 'string') {
+              // Lista de mapeamentos possíveis
+              const goalMap: Record<string, string> = {
+                'Perda de Peso': 'weight_loss',
+                'Ganho de Massa Muscular': 'muscle_gain',
+                'Aumento de Resistência': 'endurance',
+                'Flexibilidade': 'flexibility',
+                'Saúde Geral': 'health',
+                'Redução de Estresse': 'stress_reduction'
+              };
+              
+              // Verificar correspondência direta ou converter para snake_case
+              return goalMap[goal] || goal.toLowerCase().replace(/ /g, '_');
+            }
+            return goal; // Manter o original se não for string
+          });
+        }
+        title: "Logout realizado",
+        description: "Você foi desconectado com sucesso",
+      });
+      window.location.href = '/';
+    } catch (error) {
+      console.error("Erro ao fazer logout:", error);
+      toast({
+        title: "Erro ao fazer logout",
+        description: "Ocorreu um erro ao tentar desconectar",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const formatDate = (dateString?: string) => {
+    if (!dateString) return '';
+    
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleDateString('pt-BR');
+    } catch (error) {
+      return dateString;
+    }
+  };
+
+  const getInitials = (name?: string) => {
+    if (!name) return '';
+    return name.split(' ').map(n => n[0]).join('').toUpperCase();
+  };
+
+  const handleEditToggle = () => {
+    setIsEditing(!isEditing);
+  };
+
+  const handleUpdateSuccess = async () => {
+    setIsEditing(false);
+    setEditingBasicInfo(false);
+    setEditingAddress(false);
+    
+    if (!authUser) return;
+      
+    const profileData = await fetchProfile(authUser.id);
+    if (profileData) {
+      setProfile(profileData);
+      setAvatarKey(Date.now());
+    }
+  };
+
+  const handleAvatarUpdate = (newUrl: string | null) => {
+    setProfile(prev => {
+      if (!prev) return prev;
+      
+      // Atualizar a URL do avatar dentro do campo onboarding_data
+      const currentOnboardingData = typeof prev.onboarding_data === 'string'
+        ? JSON.parse(prev.onboarding_data)
+        : (prev.onboarding_data || {});
+        
+      const updatedOnboardingData = {
+        ...(currentOnboardingData as object),
+        avatar_url: newUrl
+      };
+      
+      return {
+        ...prev,
+        onboarding_data: updatedOnboardingData
+      };
+    });
+  };
+
+  const getAvatarUrl = (url?: string | null) => {
+    if (!url) return '';
+    return `${url}?t=${avatarKey}`;
+  };
+
+  if (loading) {
+    return (
+      <div className="flex flex-col min-h-screen">
+        <Navbar />
+        <main className="flex-grow bg-slate-50 pt-20 pb-12">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+              <div className="md:col-span-1">
+                <Card>
+                  <CardHeader className="text-center pb-2">
+                    <Skeleton className="h-24 w-24 rounded-full mx-auto mb-4" />
+                    <Skeleton className="h-6 w-32 mx-auto" />
+                    <Skeleton className="h-4 w-48 mx-auto mt-2" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {[1, 2, 3, 4, 5].map((i) => (
+                        <Skeleton key={i} className="h-10 w-full" />
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+              <div className="md:col-span-3">
+                <Card>
+                  <CardHeader>
+                    <Skeleton className="h-8 w-32" />
+                    <Skeleton className="h-4 w-64" />
+                  </CardHeader>
+                  <CardContent>
+                    <Skeleton className="h-12 w-full mb-6" />
+                    <div className="space-y-6">
+                      {[1, 2].map((i) => (
+                        <div key={i} className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          {[1, 2].map((j) => (
+                            <div key={j}>
+                              <Skeleton className="h-6 w-32 mb-3" />
+                              <Skeleton className="h-32 w-full rounded-md" />
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          </div>
+        </main>
+        <Footer />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col min-h-screen">
+      <Navbar />
+      <main className="flex-grow bg-slate-50 pt-20 pb-20 md:pb-0">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+            <div className="md:col-span-1">
+              <Card className="sticky top-24">
+                <CardHeader className="text-center pb-2">
+                  <AvatarUpload 
+                    currentAvatarUrl={profile?.onboarding_data?.avatar_url || null}
+                    name={profile?.nome}
+                    onAvatarUpdate={handleAvatarUpdate}
+                    size="lg"
+                  />
+                  <CardTitle className="text-xl">{profile?.nome || 'Usuário'}</CardTitle>
+                  <CardDescription>{profile?.email}</CardDescription>
+                  <p className="text-sm text-slate-500 mt-1">
+                    Membro desde {profile?.created_at ? formatDate(profile.created_at) : 'recentemente'}
+                  </p>
+                </CardHeader>
+                <CardContent className="pt-2">
+                  <div className="space-y-1">
+                    <Button variant="ghost" className="w-full justify-start" asChild>
+                      <Link to="/profile">
+                        <User className="mr-2 h-4 w-4" />
+                        Perfil
+                      </Link>
+                    </Button>
+                    <Button variant="ghost" className="w-full justify-start" asChild>
+                      <Link to="/profile/photos">
+                        <Camera className="mr-2 h-4 w-4" />
+                        Fotos de Progresso
+                      </Link>
+                    </Button>
+                    <Button variant="ghost" className="w-full justify-start" asChild>
+                      <Link to="/profile/exams">
+                        <FileText className="mr-2 h-4 w-4" />
+                        Exames e Análises
+                      </Link>
+                    </Button>
+                    <Button variant="ghost" className="w-full justify-start" asChild>
+                      <Link to="/supplements">
+                        <Pill className="mr-2 h-4 w-4" />
+                        Suplementos
+                      </Link>
+                    </Button>
+                    <Button variant="ghost" className="w-full justify-start">
+                      <Bell className="mr-2 h-4 w-4" />
+                      Notificações
+                    </Button>
+                    <Button variant="ghost" className="w-full justify-start">
+                      <Settings className="mr-2 h-4 w-4" />
+                      Configurações
+                    </Button>
+                    <Button 
+                      variant="ghost" 
+                      className="w-full justify-start text-red-500 hover:text-red-600 hover:bg-red-50"
+                      onClick={handleLogout}
+                    >
+                      <LogOut className="mr-2 h-4 w-4" />
+                      Sair
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="md:col-span-3">
+              <Card className="mb-8">
+                <CardHeader>
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <CardTitle>Perfil</CardTitle>
+                      <CardDescription>
+                        Visualize e atualize suas informações pessoais
+                      </CardDescription>
+                    </div>
+                    {!isEditing && (
+                      <Button onClick={handleEditToggle}>
+                        Editar Perfil Completo
+                      </Button>
+                    )}
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {isEditing ? (
+                    <>
+                      {/* Log explicito dos valores passados para o componente */}
+                      {console.log('Valores passados para EditProfileForm:', {
+                        secondary_goals: profile?.secondary_goals,
+                        health_issues: profile?.health_issues,
+                        dietary_restrictions: profile?.dietary_restrictions
+                      })}
+                      <EditProfileForm 
+                        profileData={profile || {}} 
+                        onCancel={handleEditToggle}
+                        onSuccess={handleUpdateSuccess}
+                      />
+                    </>
+                  ) : (
+                    <div>
+                      <div className="flex justify-center mb-6">
+                        <AvatarUpload
+                          currentAvatarUrl={profile?.avatar_url}
+                          name={profile?.nome}
+                          onAvatarUpdate={handleAvatarUpdate}
+                          size="lg"
+                        />
+                      </div>
+                      
+                      <Tabs defaultValue="personal" className="w-full">
+                        <TabsList className="grid w-full grid-cols-3">
+                          <TabsTrigger value="personal">Dados Pessoais</TabsTrigger>
+                          <TabsTrigger value="health">Dados de Saúde</TabsTrigger>
+                          <TabsTrigger value="preferences">Preferências</TabsTrigger>
+                        </TabsList>
+
+                        <TabsContent value="personal" className="mt-6 space-y-6">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div>
+                              <div className="flex justify-between items-center mb-2">
+                                <h3 className="text-lg font-medium">Informações Básicas</h3>
+                                {!editingBasicInfo ? (
+                                  <Button 
+                                    variant="ghost" 
+                                    size="sm" 
+                                    onClick={() => setEditingBasicInfo(true)}
+                                    className="flex items-center text-xs"
+                                  >
+                                    <PenSquare className="h-3.5 w-3.5 mr-1" />
+                                    Editar
+                                  </Button>
+                                ) : null}
+                              </div>
+                              
+                              {editingBasicInfo ? (
+                                <BasicInfoForm 
+                                  profileData={profile || {}}
+                                  onSuccess={handleUpdateSuccess}
+                                  onCancel={() => setEditingBasicInfo(false)}
+                                />
+                              ) : (
+                                <div className="mt-3 border rounded-md p-4 space-y-3">
+                                  <div>
+                                    <p className="text-sm font-medium text-slate-500">Nome Completo</p>
+                                    <p>{profile?.nome || '-'}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-sm font-medium text-slate-500">Email</p>
+                                    <p>{profile?.email || '-'}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-sm font-medium text-slate-500">Telefone</p>
+                                    <p>{profile?.telefone || '-'}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-sm font-medium text-slate-500">Objetivo</p>
+                                    <p>{profile?.objetivo || '-'}</p>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            <div>
+                              <div className="flex justify-between items-center mb-2">
+                                <h3 className="text-lg font-medium">Endereço</h3>
+                                {!editingAddress ? (
+                                  <Button 
+                                    variant="ghost" 
+                                    size="sm" 
+                                    onClick={() => setEditingAddress(true)}
+                                    className="flex items-center text-xs"
+                                  >
+                                    <PenSquare className="h-3.5 w-3.5 mr-1" />
+                                    Editar
+                                  </Button>
+                                ) : null}
+                              </div>
+                              
+                              {editingAddress ? (
+                                <AddressForm 
+                                  profileData={profile || {}}
+                                  onSuccess={handleUpdateSuccess}
+                                  onCancel={() => setEditingAddress(false)}
+                                />
+                              ) : (
+                                <div className="mt-3 border rounded-md p-4 space-y-3">
+                                  <div>
+                                    <p className="text-sm font-medium text-slate-500">Endereço</p>
+                                    <p>{profile?.address || '-'}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-sm font-medium text-slate-500">Bairro</p>
+                                    <p>{profile?.neighborhood || '-'}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-sm font-medium text-slate-500">Cidade/Estado</p>
+                                    <p>{profile?.city ? `${profile.city}, ${profile.state}` : '-'}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-sm font-medium text-slate-500">CEP</p>
+                                    <p>{profile?.zip_code || '-'}</p>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </TabsContent>
+                        
+                        <TabsContent value="health" className="mt-6 space-y-6">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div>
+                              <h3 className="text-lg font-medium">Dados Corporais</h3>
+                              <div className="mt-3 border rounded-md p-4 space-y-3">
+                                <div>
+                                  <p className="text-sm font-medium text-slate-500">Altura</p>
+                                  <p>-</p>
+                                </div>
+                                <div>
+                                  <p className="text-sm font-medium text-slate-500">Peso Atual</p>
+                                  <p>-</p>
+                                </div>
+                                <div>
+                                  <p className="text-sm font-medium text-slate-500">IMC</p>
+                                  <p>-</p>
+                                </div>
+                              </div>
+                            </div>
+                            <div>
+                              <h3 className="text-lg font-medium">Condições de Saúde</h3>
+                              <div className="mt-3 border rounded-md p-4 space-y-3">
+                                <div>
+                                  <p className="text-sm font-medium text-slate-500">Condições Existentes</p>
+                                  <p>-</p>
+                                </div>
+                                <div>
+                                  <p className="text-sm font-medium text-slate-500">Alergias</p>
+                                  <p>-</p>
+                                </div>
+                                <div>
+                                  <p className="text-sm font-medium text-slate-500">Medicamentos</p>
+                                  <p>-</p>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </TabsContent>
+                        
+                        <TabsContent value="preferences" className="mt-6 space-y-6">
+                          <div>
+                            <h3 className="text-lg font-medium">Preferências de Notificação</h3>
+                            <div className="mt-3 border rounded-md p-4 space-y-3">
+                              <div className="flex items-center justify-between">
+                                <p>Lembretes de Consulta</p>
+                                <Button variant="outline" size="sm">Ativado</Button>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <p>Atualizações do Plano</p>
+                                <Button variant="outline" size="sm">Ativado</Button>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <p>Dicas de Saúde</p>
+                                <Button variant="outline" size="sm">Desativado</Button>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <p>Lembretes de Medicação</p>
+                                <Button variant="outline" size="sm">Ativado</Button>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex justify-end">
+                            <Button>Salvar Preferências</Button>
+                          </div>
+                        </TabsContent>
+                      </Tabs>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center">
+                      <FileText className="h-5 w-5 mr-2 text-indigo-500" />
+                      Exames Recentes
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex flex-col items-center justify-center py-6 text-center">
+                      <FileText className="h-10 w-10 text-slate-300 mb-2" />
+                      <p className="text-slate-500">Nenhum exame encontrado</p>
+                      <p className="text-sm text-slate-400 mt-1">Faça upload de seus exames para receber análises</p>
+                    </div>
+                    <Button variant="outline" className="w-full mt-4" asChild>
+                      <Link to="/profile/exams">Ver Todos os Exames</Link>
+                    </Button>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center">
+                      <Camera className="h-5 w-5 mr-2 text-indigo-500" />
+                      Fotos de Progresso
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex flex-col items-center justify-center py-6 text-center">
+                      <Camera className="h-10 w-10 text-slate-300 mb-2" />
+                      <p className="text-slate-500">Nenhuma foto encontrada</p>
+                      <p className="text-sm text-slate-400 mt-1">Adicione fotos para acompanhar seu progresso</p>
+                    </div>
+                    <Button variant="outline" className="w-full mt-4" asChild>
+                      <Link to="/profile/photos">Ver Todas as Fotos</Link>
+                    </Button>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+      <Footer />
+      <MobileNavbar />
+    </div>
+  );
+};
+
+export default ProfilePage;

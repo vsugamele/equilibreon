@@ -1,0 +1,788 @@
+import React, { useEffect, useState, useRef } from 'react';
+import { Button } from '@/components/ui/button';
+import { BarChart, Upload, Image, Loader2, Check, X, RefreshCw } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import foodAnalysisService, { FoodAnalysisResult } from '@/services/foodAnalysisService_fixed';
+import foodHistoryService from '@/services/foodHistoryService';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { useAuth } from '@/components/auth/AuthProvider';
+import { Card } from '@/components/ui/card';
+
+// Armazenamento local para manter os dados entre recargas
+const getLocalCalories = (): number => {
+  const saved = localStorage.getItem('nutri-mindflow-calories');
+  return saved ? parseInt(saved, 10) : 0;
+};
+
+const saveLocalCalories = (calories: number): void => {
+  localStorage.setItem('nutri-mindflow-calories', calories.toString());
+  
+  // Emitir evento personalizado para sincronizar outros componentes
+  const event = new CustomEvent('calories-updated', { 
+    detail: { calories } 
+  });
+  window.dispatchEvent(event);
+};
+
+// Interfaces
+interface CalorieTrackerProps {
+  className?: string;
+}
+
+interface SimplifiedCalorieData {
+  targetCalories: number;
+  consumedCalories: number;
+}
+
+// Componente principal
+const CalorieTrackerNew: React.FC<CalorieTrackerProps> = ({ className }) => {
+  
+  // Estados locais usando localStorage para persistência
+  const [calorieData, setCalorieData] = useState<SimplifiedCalorieData>({
+    targetCalories: 2500,
+    consumedCalories: getLocalCalories()
+  });
+  
+  // Escutar eventos de atualização de calorias de outros componentes
+  useEffect(() => {
+    const handleCaloriesUpdated = (e: any) => {
+      const { calories } = e.detail;
+      setCalorieData(prev => ({
+        ...prev,
+        consumedCalories: calories
+      }));
+    };
+    
+    // Registrar ouvinte de evento
+    window.addEventListener('calories-updated', handleCaloriesUpdated);
+    
+    // Limpar ouvinte ao desmontar
+    return () => {
+      window.removeEventListener('calories-updated', handleCaloriesUpdated);
+    };
+  }, []);
+  
+  // Estados para o modal de adição de calorias
+  const [showModal, setShowModal] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [calorieInput, setCalorieInput] = useState<string>('');
+  const [foodDescriptionInput, setFoodDescriptionInput] = useState<string>('');
+  const [analysisResult, setAnalysisResult] = useState<any>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  
+  // Refs e hooks
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { toast } = useToast();
+  const { session } = useAuth();
+  const modalRef = useRef<HTMLDivElement>(null);
+
+  // Função para zerar o contador de calorias
+  const resetCalories = () => {
+    try {
+      // Resetar estado local e localStorage
+      setCalorieData(prev => ({
+        ...prev,
+        consumedCalories: 0
+      }));
+      saveLocalCalories(0);
+      
+      // Notificar o usuário
+      toast({
+        title: "Contador zerado",
+        description: "O contador de calorias foi zerado com sucesso.",
+        variant: "default"
+      });
+    } catch (error) {
+      console.error('Erro ao zerar calorias:', error);
+      toast({
+        title: "Erro ao zerar calorias",
+        description: "Não foi possível zerar o contador de calorias.",
+        variant: "destructive"
+      });
+    }
+  };
+  
+  // Atualizar o progresso da barra e salvar no banco de dados
+  const updateProgress = async (calories: number, description: string = 'Adição manual') => {
+    // Atualizar estado local e localStorage
+    const newTotal = calorieData.consumedCalories + calories;
+    setCalorieData(prev => ({
+      ...prev,
+      consumedCalories: newTotal
+    }));
+    saveLocalCalories(newTotal);
+    
+    // Verificar autenticação de forma mais robusta
+    if (!session) {
+      console.warn('Sessão não encontrada, tentando obter sessão atual...');
+      // Sem sessão, não podemos prosseguir com o salvamento
+      toast({
+        title: "Erro de autenticação",
+        description: "Você não está autenticado ou sua sessão expirou. As calorias foram adicionadas apenas localmente.",
+        variant: "destructive"
+      });
+      return true; // Retornamos true para que a UI continue funcionando, já que atualizamos o estado local
+    }
+    
+    if (!session?.user?.id) {
+      console.warn('ID do usuário não encontrado na sessão');
+      toast({
+        title: "Erro de autenticação",
+        description: "Não foi possível identificar seu usuário. As calorias foram adicionadas apenas localmente.",
+        variant: "destructive"
+      });
+      return true; // Retornamos true para que a UI continue funcionando, já que atualizamos o estado local
+    }
+      
+    try {
+      setIsSaving(true);
+      
+      // Criar objeto de análise para salvar no histórico
+      const analysisData: FoodAnalysisResult = {
+        dishName: description,
+        foodName: description,
+        calories: calories,
+        protein: 0,
+        carbs: 0,
+        fat: 0,
+        fiber: 0,
+        sugar: 0,
+        sodium: 0,
+        confidence: 1.0,
+        foodItems: [
+          { name: description, calories: calories, portion: '1 porção' }
+        ],
+        imageUrl: previewUrl || undefined,
+        healthScore: 0,
+        categories: [],
+        dietaryTags: [],
+        userRecommendations: []
+      };
+      
+      console.log('Tentando salvar com os dados:', JSON.stringify(analysisData, null, 2));
+
+      // Salvar no histórico - passando por função try/catch própria
+      try {
+        const mealId = await foodHistoryService.saveAnalysis(analysisData);
+        
+        if (mealId) {
+          console.log('Refeição salva com sucesso. ID:', mealId);
+          setTimeout(() => {
+            toast({
+              title: "Calorias adicionadas",
+              description: `${calories} calorias adicionadas e salvas no histórico com sucesso!`,
+              variant: "default",
+            });
+          }, 500);
+          return true;
+        } else {
+          throw new Error('ID não retornado ao salvar refeição');
+        }
+      } catch (saveError) {
+        console.error('Falha específica ao salvar no histórico:', saveError);
+        
+        // Mesmo com falha no salvamento, atualizamos o estado local
+        toast({
+          title: "Parcialmente salvo",
+          description: "As calorias foram adicionadas localmente, mas houve um erro ao salvar no histórico.",
+          variant: "destructive"
+        });
+        
+        // Retornamos true para não afetar a experiência do usuário
+        return true;
+      }
+    } catch (error) {
+      console.error('Erro geral ao processar refeição:', error);
+      toast({
+        title: "Erro ao processar",
+        description: "Houve um erro ao processar as calorias, mas elas foram adicionadas localmente.",
+        variant: "destructive"
+      });
+      return true; // Retornamos true para experiência do usuário
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Manipulador de arquivo
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      setSelectedFile(file);
+      
+      // Criar URL para preview
+      const objectUrl = URL.createObjectURL(file);
+      setPreviewUrl(objectUrl);
+      
+      // Reseta o resultado da análise anterior
+      setAnalysisResult(null);
+      
+      // Retorna função de limpeza
+      return () => URL.revokeObjectURL(objectUrl);
+    }
+  };
+
+  // Iniciar análise da imagem
+  const startAnalysis = async () => {
+    if (!selectedFile) {
+      toast({
+        title: "Erro",
+        description: "Por favor, selecione uma imagem para analisar.",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    // Chamar a função de análise
+    analyzeImageWithAI(selectedFile);
+  };
+
+  // Função para analisar imagem com IA
+  const analyzeImageWithAI = async (file: File) => {
+    try {
+      setIsAnalyzing(true);
+      
+      toast({
+        title: "Análise iniciada",
+        description: "Analisando sua refeição, por favor aguarde...",
+      });
+      
+      // Chama o serviço que integra com a OpenAI
+      const result = await foodAnalysisService.analyzeImage(file);
+      
+      setAnalysisResult(result);
+      
+      if (result && result.calories) {
+        setCalorieInput(result.calories.toString());
+        if (result.foodName) {
+          setFoodDescriptionInput(result.foodName);
+        }
+        
+        toast({
+          title: "Análise completa!",
+          description: `${result.foodName} - ${result.calories} calorias detectadas.`,
+          variant: "default",
+        });
+      } else {
+        toast({
+          title: "Análise incompleta",
+          description: "Não foi possível determinar as calorias. Por favor, insira manualmente.",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error("Erro na análise:", error);
+      toast({
+        title: "Erro na análise",
+        description: "Ocorreu um erro ao analisar a imagem. Por favor, tente novamente ou insira as calorias manualmente.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  // Adicionar calorias
+  const handleAddCalories = async () => {
+    const calories = parseInt(calorieInput);
+    
+    if (isNaN(calories) || calories <= 0) {
+      toast({
+        title: "Valor inválido",
+        description: "Por favor, insira um valor válido para calorias.",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    // Desativar o botão durante o processo de salvamento
+    setIsSaving(true);
+    
+    try {
+      // Atualiza o progresso e salva no banco de dados
+      const success = await updateProgress(calories, foodDescriptionInput || 'Adição manual');
+      
+      // Apenas fecha o modal se o salvamento foi bem-sucedido
+      if (success) {
+        // Feedback ao usuário
+        toast({
+          title: "Calorias adicionadas",
+          description: `${calories} calorias adicionadas com sucesso!`,
+          variant: "default",
+        });
+        
+        // Fecha o modal e reseta estados após salvamento bem-sucedido
+        setShowModal(false);
+        setSelectedFile(null);
+        setPreviewUrl(null);
+        setCalorieInput('');
+        setFoodDescriptionInput('');
+        setAnalysisResult(null);
+      }
+    } catch (error) {
+      console.error('Erro ao processar adição de calorias:', error);
+      toast({
+        title: "Erro inesperado",
+        description: "Ocorreu um erro ao processar a operação.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+  
+  // Salvar resultado da análise como calorias consumidas
+  const saveAnalysisResult = async () => {
+    if (analysisResult && analysisResult.calories) {
+      const calories = parseInt(analysisResult.calories);
+      if (!isNaN(calories) && calories > 0) {
+        try {
+          setIsSaving(true);
+          
+          // Se o usuário estiver autenticado, salvar no histórico diretamente usando o análise completa
+          if (session?.user) {
+            // Garantir que todos os campos obrigatórios estejam presentes
+            const completeAnalysisResult: FoodAnalysisResult = {
+              ...analysisResult,
+              // Garantir que campos obrigatórios existam
+              protein: analysisResult.protein || 0,
+              carbs: analysisResult.carbs || 0,
+              fat: analysisResult.fat || 0,
+              fiber: analysisResult.fiber || 0,
+              sugar: analysisResult.sugar || 0,
+              sodium: analysisResult.sodium || 0,
+              confidence: analysisResult.confidence || 1.0,
+              foodItems: analysisResult.foodItems || [
+                { name: analysisResult.foodName || 'Alimento', calories, portion: '1 porção' }
+              ],
+              healthScore: analysisResult.healthScore || 0,
+              categories: analysisResult.categories || [],
+              dietaryTags: analysisResult.dietaryTags || [],
+              userRecommendations: analysisResult.userRecommendations || []
+            };
+            
+            const mealId = await foodHistoryService.saveAnalysis(completeAnalysisResult);
+            
+            if (mealId) {
+              console.log('Análise salva com ID:', mealId);
+              // Atualizar progresso local após salvar no banco
+              setCalorieData(prev => ({
+                ...prev,
+                consumedCalories: prev.consumedCalories + calories
+              }));
+              
+              // Feedback ao usuário
+              toast({
+                title: "Calorias adicionadas",
+                description: `${calories} calorias adicionadas com sucesso!`,
+                variant: "default",
+              });
+              
+              // Reseta os estados depois de confirmar salvamento
+              setTimeout(() => {
+                setShowModal(false);
+                setSelectedFile(null);
+                setPreviewUrl(null);
+                setCalorieInput('');
+                setFoodDescriptionInput('');
+                setAnalysisResult(null);
+              }, 500); // Pequeno delay para garantir que o usuário veja o feedback
+              
+              return true;
+            } else {
+              toast({
+                title: "Erro ao salvar",
+                description: "Não foi possível salvar a análise no histórico.",
+                variant: "destructive"
+              });
+              return false;
+            }
+          } else {
+            // Caso contrário, apenas atualiza o estado local
+            console.warn('Usuário não autenticado, usando apenas atualização local');
+            // Atualiza o progresso local
+            setCalorieData(prev => ({
+              ...prev,
+              consumedCalories: prev.consumedCalories + calories
+            }));
+            
+            toast({
+              title: "Usuário não autenticado",
+              description: "As calorias foram adicionadas localmente, mas não foram salvas no histórico.",
+              variant: "destructive"
+            });
+            
+            // Mesmo sem salvar no banco, fechamos o modal com um pequeno delay
+            setTimeout(() => {
+              setShowModal(false);
+              setSelectedFile(null);
+              setPreviewUrl(null);
+              setCalorieInput('');
+              setFoodDescriptionInput('');
+              setAnalysisResult(null);
+            }, 500);
+            
+            return false;
+          }
+        } catch (error) {
+          console.error('Erro ao salvar análise:', error);
+          toast({
+            title: "Erro ao salvar",
+            description: "Houve um erro ao salvar a análise no histórico.",
+            variant: "destructive"
+          });
+          return false;
+        } finally {
+          setIsSaving(false);
+        }
+      }
+    }
+    return false;
+  };
+
+  // Manipulador de clique fora do modal para fechar
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (modalRef.current && !modalRef.current.contains(event.target as Node) && !isAnalyzing) {
+        setShowModal(false);
+      }
+    };
+
+    if (showModal) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showModal, isAnalyzing]);
+
+  // Calculando a porcentagem para a barra de progresso
+  const progressPercentage = Math.min(
+    (calorieData.consumedCalories / calorieData.targetCalories) * 100,
+    100
+  );
+
+  return (
+    <Card className={`bg-white rounded-xl shadow-sm overflow-hidden ${className}`}>
+      <div className="p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <BarChart className="h-5 w-5 text-green-600" />
+            <div className="font-semibold">Calorias</div>
+          </div>
+          <div className="flex space-x-2">
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={resetCalories}
+              className="flex items-center gap-1 bg-white border border-gray-200 hover:bg-gray-100 shadow-sm text-gray-800"
+            >
+              <RefreshCw className="h-3.5 w-3.5 text-green-600" />
+              Zerar
+            </Button>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => setShowModal(true)}
+              className="bg-white border border-gray-200 hover:bg-gray-100 shadow-sm text-gray-800"
+            >
+              Adicionar
+            </Button>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          {/* Barra de progresso */}
+          <div className="h-3 w-full bg-gray-100 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-green-500 transition-all duration-500"
+              style={{ width: `${progressPercentage}%` }}
+            />
+          </div>
+
+          {/* Contador de calorias */}
+          <div className="flex justify-between items-center">
+            <span className="text-sm text-gray-500">
+              {calorieData.consumedCalories} kcal
+            </span>
+            <span className="text-sm text-gray-500">
+              Meta: {calorieData.targetCalories} kcal
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Modal personalizado */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black bg-opacity-50">
+          <div 
+            ref={modalRef}
+            className="bg-white rounded-xl shadow-lg max-w-md w-full max-h-[90vh] overflow-auto"
+          >
+            <div className="p-6 space-y-4">
+              <div className="flex justify-between items-center">
+                <h2 className="text-xl font-semibold">Adicionar Calorias</h2>
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  className="h-8 w-8 p-0" 
+                  onClick={() => !isAnalyzing && setShowModal(false)}
+                  disabled={isAnalyzing}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+
+              <Tabs defaultValue="manual" className="w-full">
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="manual">Entrada Manual</TabsTrigger>
+                  <TabsTrigger value="photo">Foto da Refeição</TabsTrigger>
+                </TabsList>
+                
+                <TabsContent value="manual" className="space-y-4 pt-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="calories">Calorias</Label>
+                    <Input
+                      id="calories"
+                      placeholder="Ex: 350"
+                      value={calorieInput}
+                      onChange={(e) => setCalorieInput(e.target.value)}
+                      type="number"
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="description">Descrição (opcional)</Label>
+                    <Input
+                      id="description"
+                      placeholder="Ex: Café da manhã"
+                      value={foodDescriptionInput}
+                      onChange={(e) => setFoodDescriptionInput(e.target.value)}
+                    />
+                  </div>
+                  
+                  <Button 
+                    className="w-full"
+                    onClick={handleAddCalories}
+                  >
+                    Adicionar Calorias
+                  </Button>
+                </TabsContent>
+                
+                <TabsContent value="photo" className="space-y-4 pt-4">
+                  <div className="flex flex-col items-center justify-center p-4 border-2 border-dashed border-gray-300 rounded-lg text-center">
+                    {previewUrl ? (
+                      <div className="space-y-4 w-full">
+                        <div className="relative">
+                          <img 
+                            src={previewUrl} 
+                            alt="Preview" 
+                            className={`w-full h-auto rounded-lg border ${analysisResult ? 'border-green-500' : 'border-gray-300'}`} 
+                          />
+                          {analysisResult && (
+                            <div className="absolute top-2 right-2 bg-green-500 text-white rounded-full p-1">
+                              <Check className="h-4 w-4" />
+                            </div>
+                          )}
+                        </div>
+                        
+                        {analysisResult ? (
+                          <div className="space-y-4">
+                            <div className="bg-gray-50 p-4 rounded-lg">
+                              <h3 className="font-medium text-gray-900">{analysisResult.foodName}</h3>
+                              <div className="grid grid-cols-2 gap-2 mt-2">
+                                <div className="text-sm">
+                                  <span className="text-gray-500">Calorias:</span> 
+                                  <span className="ml-1 font-medium">{analysisResult.calories} kcal</span>
+                                </div>
+                                <div className="text-sm">
+                                  <span className="text-gray-500">Proteínas:</span>
+                                  <span className="ml-1 font-medium">{analysisResult.protein}g</span>
+                                </div>
+                                <div className="text-sm">
+                                  <span className="text-gray-500">Carboidratos:</span>
+                                  <span className="ml-1 font-medium">{analysisResult.carbs}g</span>
+                                </div>
+                                <div className="text-sm">
+                                  <span className="text-gray-500">Gorduras:</span>
+                                  <span className="ml-1 font-medium">{analysisResult.fat}g</span>
+                                </div>
+                              </div>
+                              <div className="mt-2 text-sm">
+                                <span className="text-gray-500">Nota de saúde:</span>
+                                <span className="ml-1 font-medium">{analysisResult.healthScore}/10</span>
+                              </div>
+                            </div>
+                            
+                            <Button 
+                              className="w-full" 
+                              onClick={handleAddCalories}
+                            >
+                              Adicionar {analysisResult.calories} Calorias
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="space-y-2 w-full">
+                            <Button 
+                              className="w-full" 
+                              onClick={startAnalysis}
+                              disabled={isAnalyzing || !selectedFile}
+                            >
+                              {isAnalyzing ? (
+                                <>
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  Analisando...
+                                </>
+                              ) : (
+                                <>
+                                  <Image className="mr-2 h-4 w-4" />
+                                  Analisar Imagem
+                                </>
+                              )}
+                            </Button>
+                            <Button 
+                              variant="outline" 
+                              className="w-full" 
+                              onClick={() => {
+                                setSelectedFile(null);
+                                setPreviewUrl(null);
+                              }}
+                              disabled={isAnalyzing}
+                            >
+                              Remover Imagem
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <Upload className="mx-auto h-8 w-8 text-gray-400" />
+                        <div className="text-sm text-gray-500">
+                          Clique para selecionar ou arraste uma imagem da sua refeição
+                        </div>
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          className="hidden"
+                          accept="image/*"
+                          onChange={handleFileChange}
+                          disabled={isAnalyzing}
+                        />
+                        <Button 
+                          variant="outline" 
+                          className="w-full"
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={isAnalyzing}
+                        >
+                          Selecionar Imagem
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Campo de entrada manual de calorias caso a análise falhe */}
+                  {(previewUrl && !analysisResult && !isAnalyzing) && (
+                    <div className="space-y-4 border-t pt-4 mt-4">
+                      <div className="text-sm text-gray-500">
+                        Ou insira as calorias manualmente:
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="calories">Calorias</Label>
+                        <Input
+                          id="calories"
+                          placeholder="Ex: 350"
+                          value={calorieInput}
+                          onChange={(e) => setCalorieInput(e.target.value)}
+                          type="number"
+                        />
+                      </div>
+                      
+                      <div className="space-y-2">
+                        <Label htmlFor="description">Descrição (opcional)</Label>
+                        <Input
+                          id="description"
+                          placeholder="Ex: Café da manhã"
+                          value={foodDescriptionInput}
+                          onChange={(e) => setFoodDescriptionInput(e.target.value)}
+                        />
+                      </div>
+                      
+                      <Button 
+                        className="w-full"
+                        variant="default"
+                        onClick={handleAddCalories}
+                      >
+                        Adicionar Calorias
+                      </Button>
+                    </div>
+                  )}
+                  
+                  {/* Exibir resultado da análise e botão para adicionar */}
+                  {(analysisResult && !isAnalyzing) && (
+                    <div className="space-y-4 border-t pt-4 mt-4">
+                      <div className="text-sm text-green-600 font-semibold">
+                        Análise completa!
+                      </div>
+                      
+                      <div className="space-y-2 bg-gray-50 p-3 rounded-md">
+                        <div className="flex justify-between items-center">
+                          <span className="font-medium">Alimento:</span>
+                          <span>{analysisResult.foodName || 'Não identificado'}</span>
+                        </div>
+                        
+                        <div className="flex justify-between items-center">
+                          <span className="font-medium">Calorias:</span>
+                          <span className="text-orange-600 font-bold">{analysisResult.calories} kcal</span>
+                        </div>
+                        
+                        {analysisResult.nutrients && (
+                          <div className="mt-2 space-y-1 pt-2 border-t border-gray-200">
+                            <div className="text-xs font-semibold text-gray-600">Nutrientes:</div>
+                            <div className="grid grid-cols-2 gap-1 text-xs">
+                              {Object.entries(analysisResult.nutrients || {}).map(([key, value]) => (
+                                <div key={key} className="flex justify-between">
+                                  <span className="capitalize">{key}:</span>
+                                  <span>{String(value)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      
+                      <Button 
+                        className="w-full"
+                        variant="default"
+                        onClick={saveAnalysisResult}
+                        disabled={isSaving}
+                      >
+                        {isSaving ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Salvando...
+                          </>
+                        ) : (
+                          <>
+                            <Check className="mr-2 h-4 w-4" />
+                            Adicionar às Calorias Consumidas
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  )}
+                </TabsContent>
+              </Tabs>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+};
+
+export default CalorieTrackerNew;

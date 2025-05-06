@@ -1,0 +1,540 @@
+import React, { useState, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { FileText, Upload, Loader2, Search, AlertCircle, CheckCircle, Utensils, ArrowRight, Brain } from 'lucide-react';
+import { useToast } from '@/components/ui/use-toast';
+import { Badge } from '@/components/ui/badge';
+import { COMMON_EXAM_TYPES, analyzeExamWithAI } from '@/services/examAnalysisService';
+
+// Componente para análise local de exames, sem armazenamento no Supabase
+// Usa a mesma API da OpenAI diretamente do frontend, como preferido pelo usuário
+const LocalExamAnalysis: React.FC = () => {
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [examName, setExamName] = useState('');
+  const [examType, setExamType] = useState('');
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState<any>(null);
+  const [extractedText, setExtractedText] = useState<string>('');
+  const [showPdfProcessor, setShowPdfProcessor] = useState(false);
+  const { toast } = useToast();
+  
+  // Configurar receptor de mensagens do iframe do processador de PDF
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      // Verificar se a mensagem veio do nosso processador
+      if (event.data && event.data.type === 'pdf-processed') {
+        console.log('Texto extraído recebido do processador:', event.data.content.slice(0, 100) + '...');
+        setExtractedText(event.data.content);
+        setShowPdfProcessor(false);
+        
+        toast({
+          title: "PDF processado com sucesso",
+          description: `Extraídos ${event.data.content.length} caracteres do arquivo.`,
+        });
+      }
+    };
+    
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [toast]);
+
+  // Função extremamente simplificada para extrair texto de qualquer arquivo
+  const readFileAsText = async (file: File): Promise<string> => {
+    try {
+      // Método único e direto para qualquer tipo de arquivo
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        
+        reader.onload = () => {
+          try {
+            // Converter para string e limpar
+            const text = String(reader.result || '');
+            // Detectar se o conteúdo parece ser base64/binário (como em PDFs)
+            const isBinary = /^data:|^%PDF/.test(text);
+            
+            // Para arquivos binários ou PDFs, retornar uma mensagem amigável
+            if (isBinary && file.type === 'application/pdf') {
+              resolve(`[Conteúdo em formato PDF] ${file.name} (${Math.round(file.size/1024)}KB). ` + 
+                     "Por favor, este formato não é ideal para análise. " +
+                     "Para melhor resultado, copie e cole o texto do exame diretamente.");
+            } else {
+              // Para textos normais, limpar e normalizar
+              resolve(text
+                .replace(/[^\x20-\x7E\n\r\t\u00C0-\u00FF]/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim());
+            }
+          } catch (e) {
+            // Em caso de erro, retornar informações básicas do arquivo
+            resolve(`Arquivo: ${file.name} (${file.type}). ` +
+                   "Conteúdo não pode ser extraído completamente.");
+          }
+        };
+        
+        reader.onerror = () => {
+          // Em caso de erro de leitura, ainda retorna algo útil
+          resolve(`Erro ao ler: ${file.name}. ` +
+                 "Tente copiar o conteúdo do exame e colar em um arquivo .txt");
+        };
+        
+        // Para qualquer arquivo, usar readAsText (mais simples e confiável)
+        reader.readAsText(file);
+      });
+    } catch (error) {
+      // Nunca falha, sempre retorna alguma informação útil
+      return `Arquivo: ${file.name} - ${Math.round(file.size/1024)}KB. ` +
+             "O conteúdo não pôde ser processado. " +
+             "Recomendo copiar o texto do exame e colar em um arquivo .txt.";
+    }
+  };
+  
+  // Detectar automaticamente o tipo de exame a partir do conteúdo
+  const detectExamType = (content: string): string => {
+    const contentLower = content.toLowerCase();
+    
+    // Buscar indicações claras do tipo de exame
+    if (contentLower.includes('hemograma') || 
+        contentLower.includes('hemácias') || 
+        contentLower.includes('hematócrito') || 
+        contentLower.includes('hemoglobina') || 
+        contentLower.includes('leucócito') || 
+        contentLower.includes('plaqueta')) {
+      return 'hemograma';
+    }
+    
+    if (contentLower.includes('colesterol') || 
+        contentLower.includes('ldl') || 
+        contentLower.includes('hdl') || 
+        contentLower.includes('triglicerídeo') || 
+        contentLower.includes('triglicerídeos')) {
+      return 'lipidograma';
+    }
+    
+    if (contentLower.includes('glicose') || 
+        contentLower.includes('glicemia') || 
+        contentLower.includes('hemoglobina glicada') || 
+        contentLower.includes('a1c')) {
+      return 'glicemia';
+    }
+    
+    if (contentLower.includes('tsh') || 
+        contentLower.includes('t3') || 
+        contentLower.includes('t4') || 
+        contentLower.includes('tireóide') ||
+        contentLower.includes('tireoide')) {
+      return 'tireoide';
+    }
+    
+    return examType || 'exame laboratorial';
+  };
+
+  // Função para análise usando o processador de PDF avançado quando possível
+  const handleAnalyze = async () => {
+    // 1. Validação básica
+    if (!examName || !selectedFile) {
+      toast({
+        title: "Campos obrigatórios",
+        description: "Por favor, dê um nome ao exame e selecione um arquivo para análise.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    setIsAnalyzing(true);
+    setAnalysisResult(null);
+
+    try {
+      // 2. Notificar início do processamento
+      toast({
+        title: "Processando arquivo",
+        description: "Extraindo conteúdo do exame...",
+      });
+      
+      // 3. Usando o texto extraído pelo processador de PDF quando disponível
+      let fileContent = "";
+      if (extractedText && selectedFile?.type === 'application/pdf') {
+        fileContent = extractedText;
+        console.log('Usando texto extraído do processador de PDF, tamanho:', fileContent.length);
+      } else {
+        try {
+          fileContent = await readFileAsText(selectedFile);
+          console.log('Arquivo processado via FileReader, tamanho:', fileContent.length);
+        } catch (readError) {
+          console.error('Erro ao ler arquivo:', readError);
+          fileContent = `Erro ao processar ${selectedFile.name}. Tipo: ${selectedFile.type}`;
+        }
+      }
+      
+      // 4. Verificar qualidade do conteúdo
+      let formattedContent = fileContent;
+      if (formattedContent.trim().length < 100) {
+        toast({
+          title: "⚠️ Conteúdo limitado",
+          description: "Conteúdo muito curto. Tentaremos processar mesmo assim.",
+          variant: "default",
+        });
+        
+        // Acrescentar informações para ajudar a análise mesmo com conteúdo limitado
+        formattedContent = fileContent + "\n\nTipo de exame esperado: " + (examType || "não especificado") + 
+                       "\nNome do arquivo: " + selectedFile.name;
+      }
+      
+      // 5. Detectar tipo de exame
+      const detectedType = detectExamType(formattedContent);
+      const finalExamType = detectedType || examType || 'exame laboratorial';
+      
+      // 6. Informar usuário sobre o tipo detectado
+      if (detectedType && detectedType !== examType && examType) {
+        toast({
+          title: "Tipo de exame identificado",
+          description: `Detectamos um exame de tipo ${detectedType}. A análise será ajustada automaticamente.`,
+        });
+        setExamType(detectedType);
+      }
+      
+      // 7. Iniciar análise pela IA
+      toast({
+        title: "Analisando conteúdo",
+        description: "Processando valores e referências do exame...",
+      });
+      
+      try {
+        // 8. Análise usando formato estruturado para evitar problemas
+        const structuredContent = `EXAME MÉDICO\n\nTIPO: ${finalExamType}\n\nDADOS BRUTOS:\n${formattedContent}`;
+          
+        const analysis = await analyzeExamWithAI(
+          structuredContent,
+          finalExamType,
+          { age: 35, gender: 'não especificado' },
+          undefined // usar chave padrão
+        );
+        
+        // 9. Garantir que o resultado tenha todos os campos necessários
+        if (!analysis.abnormalValues) analysis.abnormalValues = [];
+        if (!analysis.recommendations) analysis.recommendations = [
+          "Consulte um profissional para interpretar seu exame."
+        ];
+        if (!analysis.nutritionRecommendations) analysis.nutritionRecommendations = [
+          "Para recomendações nutricionais precisas, consulte um nutricionista."
+        ];
+        // Adicionamos examType explicitamente para corrigir o erro de lint
+        analysis.examType = finalExamType;
+        if (!analysis.summary) analysis.summary = "Análise concluída. Verifique os resultados abaixo.";
+        
+        setAnalysisResult(analysis);
+        
+        // 10. Notificar sucesso
+        toast({
+          title: "Análise concluída",
+          description: "Seu exame foi analisado com sucesso!",
+          variant: "default",
+        });
+      } catch (aiError) {
+        // 11. Tratamento de erro específico da API da OpenAI
+        console.error('Erro na comunicação com a IA:', aiError);
+        
+        // Criar um resultado de emergência quando tudo falhar
+        const emergencyResult = {
+          summary: "Não foi possível analisar automaticamente o exame.",
+          abnormalValues: [],
+          recommendations: ["Consulte um profissional para interpretar seu exame."],
+          nutritionRecommendations: ["Para recomendações nutricionais precisas, consulte um nutricionista."],
+          examType: finalExamType
+        };
+        
+        setAnalysisResult(emergencyResult);
+        
+        toast({
+          title: "Problema na análise",
+          description: "Tivemos dificuldade em processar este exame. Tente novamente com um arquivo de texto simples.",
+          variant: "default",
+        });
+      }
+    } catch (error) {
+      // 12. Tratamento de erro geral
+      console.error('Erro geral na análise:', error);
+      
+      // Mesmo com erro geral, criar um resultado para exibir algo ao usuário
+      const fallbackResult = {
+        summary: "Ocorreu um erro ao analisar o exame.",
+        abnormalValues: [],
+        recommendations: ["Tente novamente com outro arquivo ou formato."],
+        nutritionRecommendations: [],
+        examType: examType || 'exame laboratorial'
+      };
+      
+      setAnalysisResult(fallbackResult);
+      
+      toast({
+        title: "Erro no processamento",
+        description: "Não foi possível processar o arquivo. Tente novamente com um formato diferente.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      const file = files[0];
+      setSelectedFile(file);
+      
+      // Se for PDF, mostrar o processador de PDF
+      if (file.type === 'application/pdf') {
+        setShowPdfProcessor(true);
+        toast({
+          title: "Processando PDF",
+          description: "Nosso processador de PDF será aberto para extrair o texto com precisão.",
+        });
+      } else {
+        // Reset texto extraído para arquivos não-PDF
+        setExtractedText('');
+      }
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Modal/Overlay do Processador de PDF quando necessário */}
+      {showPdfProcessor && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex flex-col">
+          <div className="bg-white dark:bg-gray-800 p-4 shadow-lg rounded-b-lg flex items-center justify-between">
+            <h2 className="text-lg font-semibold">Processador de PDF</h2>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={() => setShowPdfProcessor(false)}
+            >
+              Fechar
+            </Button>
+          </div>
+          <div className="flex-grow overflow-hidden">
+            <iframe 
+              src="/pdf-processor.html" 
+              className="w-full h-full border-none"
+              title="Processador de PDF"
+            />
+          </div>
+        </div>
+      )}
+      
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Upload className="h-5 w-5 text-indigo-500 dark:text-indigo-400" />
+              Analisar Exame Sem Armazenamento
+            </CardTitle>
+            <CardDescription>
+              Faça upload do seu exame em texto para análise automática (sem salvá-lo no banco)
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-6 mb-2">
+              <div className="grid gap-3">
+                <Label htmlFor="examName">Nome do Exame</Label>
+                <Input
+                  id="examName"
+                  placeholder="Ex: Hemograma Completo"
+                  value={examName}
+                  onChange={(e) => setExamName(e.target.value)}
+                />
+              </div>
+              
+              <div className="grid gap-3">
+                <Label htmlFor="examType">Tipo de Exame</Label>
+                <select
+                  id="examType"
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                  value={examType}
+                  onChange={(e) => setExamType(e.target.value)}
+                >
+                  <option value="">Selecione o tipo (opcional)</option>
+                  {COMMON_EXAM_TYPES.map((type) => (
+                    <option key={type} value={type}>
+                      {type.charAt(0).toUpperCase() + type.slice(1)}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  Se não souber o tipo, deixe em branco. Faremos detecção automática.
+                </p>
+              </div>
+              
+              <div className="grid gap-3">
+                <Label htmlFor="file">Arquivo do Exame</Label>
+                <div className="flex items-center gap-3">
+                  <Input
+                    id="file"
+                    type="file"
+                    accept=".txt,.pdf"
+                    onChange={handleFileChange}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground flex items-center gap-1">
+                  <AlertCircle className="h-3 w-3 text-yellow-500" />
+                  Para melhor resultado, use arquivos .txt
+                </p>
+                {extractedText && (
+                  <p className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
+                    <CheckCircle className="h-3 w-3" />
+                    Texto extraído e pronto para análise
+                  </p>
+                )}
+              </div>
+            </div>
+            
+            <Button
+              onClick={handleAnalyze}
+              disabled={isAnalyzing || !selectedFile}
+              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white"
+            >
+              {isAnalyzing ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Analisando...
+                </>
+              ) : (
+                <>
+                  <Search className="mr-2 h-4 w-4" />
+                  Analisar com IA
+                </>
+              )}
+            </Button>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardContent className="p-6">
+            {analysisResult ? (
+              <div className="space-y-6">
+                <div className="mb-6">
+                  <h2 className="text-xl font-semibold mb-2 flex items-center gap-2">
+                    <Brain className="h-5 w-5 text-indigo-500 dark:text-indigo-400" />
+                    {examName}
+                  </h2>
+                  
+                  <div className="flex items-center gap-2 mb-4">
+                    <Badge variant="outline" className="text-xs">
+                      {analysisResult.examType || 'exame laboratorial'}
+                    </Badge>
+                  </div>
+                  
+                  <div className="p-4 bg-slate-50 dark:bg-slate-900 rounded-lg">
+                    <p className="text-slate-700 dark:text-slate-300">
+                      {analysisResult.summary}
+                    </p>
+                  </div>
+                </div>
+                
+                {analysisResult.abnormalValues && analysisResult.abnormalValues.length > 0 && (
+                  <div>
+                    <h3 className="text-lg font-semibold mb-2">Valores Alterados</h3>
+                    <div className="space-y-3">
+                      {analysisResult.abnormalValues.map((item: any, index: number) => (
+                        <div key={index} className="border rounded-md p-3 bg-white dark:bg-gray-800">
+                          <div className="flex justify-between items-start mb-1">
+                            <div className="font-medium">{item.name}</div>
+                            <Badge 
+                              variant={getSeverityVariant(item.severity)} 
+                              className={getSeverityColor(item.severity)}
+                            >
+                              {getSeverityLabel(item.severity)}
+                            </Badge>
+                          </div>
+                          <div className="text-sm text-slate-500 dark:text-slate-400 mt-1 space-x-2 flex flex-wrap">
+                            <span>Valor: <strong>{item.value}</strong></span>
+                            <span className="mx-2">|</span>
+                            <span>Referência: {item.reference}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
+                {analysisResult.recommendations && analysisResult.recommendations.length > 0 && (
+                  <div>
+                    <h3 className="text-lg font-semibold mb-2">Recomendações</h3>
+                    <ul className="space-y-1 list-disc pl-5">
+                      {analysisResult.recommendations.map((rec: string, index: number) => (
+                        <li key={index} className="text-slate-700 dark:text-slate-300">{rec}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                
+                {analysisResult.nutritionRecommendations && analysisResult.nutritionRecommendations.length > 0 && (
+                  <div className="mt-6 border-t pt-6 dark:border-slate-700">
+                    <h3 className="font-medium text-lg mb-4 flex items-center gap-2 text-foreground">
+                      <Utensils className="h-5 w-5 text-indigo-500 dark:text-indigo-400" />
+                      Recomendações Nutricionais
+                    </h3>
+                    
+                    <ul className="space-y-2 list-disc pl-5 mb-4">
+                      {analysisResult.nutritionRecommendations.map((rec: string, index: number) => (
+                        <li key={index} className="text-slate-700 dark:text-slate-300">{rec}</li>
+                      ))}
+                    </ul>
+                    
+                    <Button 
+                      className="mt-2 bg-green-600 hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-700 text-white dark:text-white"
+                      onClick={() => window.location.href = '/meal-plan?source=exams'}
+                    >
+                      Gerar Plano Alimentar Personalizado
+                      <ArrowRight className="ml-2 h-4 w-4" />
+                    </Button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="text-center py-12">
+                <FileText className="h-12 w-12 mx-auto text-slate-300 dark:text-slate-600 mb-4" />
+                <h3 className="text-lg font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  Nenhuma análise ainda
+                </h3>
+                <p className="text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+                  Selecione um arquivo de exame e clique em "Analisar com IA" para obter uma análise detalhada do seu exame médico.
+                </p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+};
+
+// Funções auxiliares para estilos de severidade
+const getSeverityColor = (severity: string) => {
+  switch (severity) {
+    case 'low': return 'text-yellow-600 bg-yellow-50 border-yellow-200 dark:text-yellow-400 dark:bg-yellow-950/50 dark:border-yellow-900';
+    case 'medium': return 'text-orange-600 bg-orange-50 border-orange-200 dark:text-orange-400 dark:bg-orange-950/50 dark:border-orange-900';
+    case 'high': return 'text-red-600 bg-red-50 border-red-200 dark:text-red-400 dark:bg-red-950/50 dark:border-red-900';
+    default: return 'text-green-600 bg-green-50 border-green-200 dark:text-green-400 dark:bg-green-950/50 dark:border-green-900';
+  }
+};
+
+const getSeverityVariant = (severity: string) => {
+  switch (severity) {
+    case 'low': return 'secondary';
+    case 'medium': return 'secondary';
+    case 'high': return 'destructive';
+    default: return 'outline';
+  }
+};
+
+const getSeverityLabel = (severity: string) => {
+  switch (severity) {
+    case 'low': return 'Leve';
+    case 'medium': return 'Moderado';
+    case 'high': return 'Alto';
+    default: return 'Normal';
+  }
+};
+
+export default LocalExamAnalysis;

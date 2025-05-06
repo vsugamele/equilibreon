@@ -1,0 +1,304 @@
+
+import React, { useState, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Label } from '@/components/ui/label';
+import { Camera, Calendar, ChevronLeft, ChevronRight, Plus, Trash2, Loader2, Lightbulb, AlertCircle, RefreshCw } from 'lucide-react';
+import { useToast } from '@/components/ui/use-toast';
+import { Badge } from '@/components/ui/badge';
+import { ProgressPhoto } from '@/types/supabase';
+import { uploadProgressPhoto, getProgressPhotos, deleteProgressPhoto, reanalyzePhoto } from '@/services/profilePhotoService';
+import { supabase } from "@/integrations/supabase/client";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { addAlternativeUrls, handleImageError } from '@/utils/imageLoader';
+import { addAlternativeUrls, handleImageError } from '@/utils/imageLoader';
+
+interface AIAnalysis {
+  summary?: string;
+  posture?: string;
+  bodyComposition?: string;
+  bodyMassEstimate?: {
+    bmi: number | null;
+    bodyFatPercentage: number | null;
+    musclePercentage: number | null;
+    confidence: 'low' | 'medium' | 'high';
+  };
+  nutritionSuggestions?: {
+    calorieAdjustment: number | null;
+    macroRatioSuggestion: string | null;
+    focusAreas: string[];
+  };
+  recommendations?: string[];
+}
+
+function isAIAnalysisObject(value: any): value is AIAnalysis {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+const ProfilePhotos = () => {
+  const [photos, setPhotos] = useState<ProgressPhoto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [selectedType, setSelectedType] = useState<'front' | 'side' | 'back'>('front');
+  const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [user, setUser] = useState<any>(null);
+  const { toast } = useToast();
+
+  // Check authentication status when the component mounts
+  // Função para armazenar fotos no localStorage para persistência entre sessões
+  // Função para aplicar melhorias de URLs e tratamento de erros
+
+  const savePhotosToLocalStorage = (photos: ProgressPhoto[]) => {
+    try {
+      localStorage.setItem('progressPhotos', JSON.stringify(photos));
+      console.log('Fotos salvas no localStorage');
+    } catch (e) {
+      console.error('Erro ao salvar fotos no localStorage:', e);
+    }
+  };
+
+  // Função para recuperar fotos do localStorage
+  const getPhotosFromLocalStorage = (): ProgressPhoto[] => {
+    try {
+      const saved = localStorage.getItem('progressPhotos');
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch (e) {
+      console.error('Erro ao ler fotos do localStorage:', e);
+    }
+    return [];
+  };
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const { data, error } = await supabase.auth.getUser();
+        if (error) {
+          console.error("Authentication error:", error);
+          setAuthError("Você precisa estar logado para acessar suas fotos de progresso.");
+          setLoading(false);
+          return;
+        }
+        
+        if (data?.user) {
+          setUser(data.user);
+          
+          // Primeiro, carregar fotos do localStorage para exibição imediata
+          const cachedPhotos = getPhotosFromLocalStorage();
+          if (cachedPhotos.length > 0) {
+            setPhotos(cachedPhotos);
+            setLoading(false);
+          }
+          
+          // Depois, carregar fotos atualizadas do servidor
+          await loadPhotos();
+        } else {
+          setAuthError("Você precisa estar logado para acessar suas fotos de progresso.");
+          setLoading(false);
+        }
+      } catch (error) {
+        console.error("Auth check error:", error);
+        setAuthError("Ocorreu um erro ao verificar sua autenticação.");
+        setLoading(false);
+      }
+    };
+
+    checkAuth();
+  }, []);
+
+  const loadPhotos = async () => {
+    if (!user) return;
+    
+    setLoading(true);
+    try {
+      const loadedPhotos = await getProgressPhotos();
+      
+      // Processar fotos para adicionar URLs alternativas e melhorar acesso
+      const processedPhotos = loadedPhotos.map(photo => {
+        // Verificar se a URL da foto é relativa ou absoluta
+        if (photo.photo_url && !photo.photo_url.startsWith('http')) {
+          // Se for relativa, adicionar o URL base do Supabase
+          const baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+          if (baseUrl) {
+            photo.photo_url = `${baseUrl}/storage/v1/object/public/${photo.photo_url}`;
+          }
+        }
+        
+        // Adicionar URLs alternativas para ajudar no carregamento
+        return addAlternativeUrls(photo);
+      });
+      
+      // Atualizar o estado e o cache local
+      setPhotos(processedPhotos);
+      savePhotosToLocalStorage(processedPhotos);
+      
+      if (processedPhotos.length > 0) {
+        const filteredPhotos = processedPhotos.filter(photo => photo.type === selectedType);
+        if (filteredPhotos.length > 0 && currentPhotoIndex >= filteredPhotos.length) {
+          setCurrentPhotoIndex(0);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load photos:', error);
+      
+      // Fallback para fotos em cache se houver erro ao carregar do servidor
+      const cachedPhotos = getPhotosFromLocalStorage();
+      if (cachedPhotos.length > 0 && photos.length === 0) {
+        setPhotos(cachedPhotos);
+        toast({
+          title: "Usando fotos em cache",
+          description: "Exibindo fotos salvas localmente devido a um erro de conexão.",
+          variant: "default",
+        });
+      } else {
+        toast({
+          title: "Erro ao carregar fotos",
+          description: "Não foi possível carregar suas fotos de progresso.",
+          variant: "destructive",
+        });
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Filtrar e fazer log para debug
+  const filteredPhotos = photos.filter(photo => photo.type === selectedType);
+  const currentPhoto = filteredPhotos[currentPhotoIndex];
+  
+  console.log('Todas as fotos:', photos);
+  console.log('Fotos filtradas:', filteredPhotos);
+  console.log('Foto atual:', currentPhoto, 'Índice:', currentPhotoIndex);
+  console.log('Tipo selecionado:', selectedType);
+
+  const handlePrevPhoto = () => {
+    if (currentPhotoIndex > 0) {
+      setCurrentPhotoIndex(currentPhotoIndex - 1);
+    }
+  };
+
+  const handleNextPhoto = () => {
+    if (currentPhotoIndex < filteredPhotos.length - 1) {
+      setCurrentPhotoIndex(currentPhotoIndex + 1);
+    }
+  };
+
+  const handlePhotoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    
+    setUploading(true);
+    try {
+      const newPhoto = await uploadProgressPhoto(file, selectedType);
+      
+      if (newPhoto) {
+        // Adicionar URLs alternativas para a nova foto
+        const processedNewPhoto = addAlternativeUrls(newPhoto);
+        
+        const updatedPhotos = [...photos, processedNewPhoto];
+        setPhotos(updatedPhotos);
+        savePhotosToLocalStorage(updatedPhotos);
+        
+        // Selecionar a nova foto
+        const filteredPhotos = updatedPhotos.filter(photo => photo.type === selectedType);
+        const newPhotoIndex = filteredPhotos.length - 1;
+        setCurrentPhotoIndex(newPhotoIndex);
+        
+        toast({
+          title: "Foto adicionada",
+          description: "Sua foto de progresso foi adicionada com sucesso!",
+        });
+      } else {
+        throw new Error('Falha ao fazer upload da foto');
+      }
+    } catch (error) {
+      console.error('Error uploading photo:', error);
+      toast({
+        title: "Erro no upload",
+        description: "Não foi possível fazer o upload da sua foto. Tente novamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setUploading(false);
+      // Limpar o input do arquivo para permitir uploads repetidos do mesmo arquivo
+      if (event.target) {
+        event.target.value = '';
+      }
+    }
+  };
+
+  return (
+    <div className="max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
+      <div className="bg-white rounded-lg shadow-md p-4">
+        <Card>
+          <CardHeader>
+            <CardTitle>Fotos de Progresso</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {loading ? (
+              <div className="flex justify-center">
+                <Loader2 className="h-6 w-6 animate-spin" />
+              </div>
+            ) : (
+              <div className="flex flex-col space-y-4">
+                {filteredPhotos.length > 0 ? (
+                  <div className="flex flex-col space-y-4">
+                    <div className="flex justify-between items-center">
+                      <Button variant="ghost" size="icon" onClick={handlePrevPhoto}>
+                        <ChevronLeft className="h-5 w-5" />
+                      </Button>
+                      <div className="flex items-center space-x-2">
+                        {filteredPhotos.map((photo, index) => (
+                          <img 
+                            key={photo.id} 
+                            src={imageLoader(photo.photo_url)} 
+                            alt="" 
+                            className={`aspect-[3/4] object-cover ${index === currentPhotoIndex ? 'border-2 border-blue-500' : ''}`} 
+                            onError={(e) => handleImageError(e, photo)} 
+                          />
+                        ))}
+                      </div>
+                      <Button variant="ghost" size="icon" onClick={handleNextPhoto}>
+                        <ChevronRight className="h-5 w-5" />
+// ...
+                    </div>
+                    <div className="flex justify-center">
+                      <img
+                        src={currentPhoto.photo_url}
+                        alt="Progress Photo"
+                        className="rounded-lg mx-auto h-[600px] max-h-[80vh] object-contain"
+                        onError={(e) => handleImageError(e, currentPhoto)}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex justify-center">
+                    <p>Nenhuma foto encontrada.</p>
+                  </div>
+                                    <RefreshCw className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })
+                )}
+              </div>
+            )}
+          </CardContent>
+          <CardFooter className="flex justify-between border-t dark:border-slate-700 pt-4">
+            <Button variant="outline">Exportar Relatório</Button>
+            <Button variant="outline">Compartilhar Progresso</Button>
+          </CardFooter>
+        </Card>
+      </div>
+    </div>
+  );
+};
+
+export default ProfilePhotos;

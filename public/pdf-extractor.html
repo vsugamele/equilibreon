@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Extrator de PDF - NutriMindflow</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+      line-height: 1.6;
+      color: #333;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    h1 {
+      color: #2563eb;
+      margin-bottom: 1rem;
+    }
+    .container {
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    }
+    .form-group {
+      margin-bottom: 1rem;
+    }
+    label {
+      display: block;
+      margin-bottom: 0.5rem;
+      font-weight: 500;
+    }
+    input[type="file"] {
+      width: 100%;
+      padding: 0.5rem;
+      border: 1px solid #d1d5db;
+      border-radius: 4px;
+    }
+    button {
+      background-color: #2563eb;
+      color: white;
+      border: none;
+      padding: 0.5rem 1rem;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: 500;
+    }
+    button:hover {
+      background-color: #1d4ed8;
+    }
+    button:disabled {
+      background-color: #93c5fd;
+      cursor: not-allowed;
+    }
+    .result {
+      margin-top: 1.5rem;
+      border-top: 1px solid #e5e7eb;
+      padding-top: 1.5rem;
+    }
+    textarea {
+      width: 100%;
+      min-height: 200px;
+      padding: 0.5rem;
+      border: 1px solid #d1d5db;
+      border-radius: 4px;
+      font-family: monospace;
+    }
+    .status {
+      margin-top: 1rem;
+      padding: 0.5rem;
+      border-radius: 4px;
+    }
+    .status.success {
+      background-color: #ecfdf5;
+      color: #047857;
+      border: 1px solid #a7f3d0;
+    }
+    .status.error {
+      background-color: #fef2f2;
+      color: #b91c1c;
+      border: 1px solid #fecaca;
+    }
+    .status.info {
+      background-color: #eff6ff;
+      color: #1e40af;
+      border: 1px solid #bfdbfe;
+    }
+    .actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 1rem;
+    }
+    .copy-btn {
+      background-color: #059669;
+    }
+    .copy-btn:hover {
+      background-color: #047857;
+    }
+    .close-btn {
+      background-color: #6b7280;
+    }
+    .close-btn:hover {
+      background-color: #4b5563;
+    }
+    .progress {
+      margin-top: 1rem;
+      height: 8px;
+      background-color: #e5e7eb;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .progress-bar {
+      height: 100%;
+      background-color: #2563eb;
+      width: 0%;
+      transition: width 0.3s ease;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Extrator de Texto de PDF</h1>
+    <p>Carregue um arquivo PDF para extrair o texto. O texto extraído pode ser copiado e colado na análise de exames.</p>
+    
+    <div class="form-group">
+      <label for="pdfFile">Selecione um arquivo PDF:</label>
+      <input type="file" id="pdfFile" accept=".pdf" />
+    </div>
+    
+    <button id="extractBtn">Extrair Texto</button>
+    
+    <div class="progress">
+      <div class="progress-bar" id="progressBar"></div>
+    </div>
+    
+    <div id="statusMessage" class="status info" style="display: none;"></div>
+    
+    <div class="result" id="resultContainer" style="display: none;">
+      <label for="extractedText">Texto Extraído:</label>
+      <textarea id="extractedText" readonly></textarea>
+      
+      <div class="actions">
+        <button id="copyBtn" class="copy-btn">Copiar Texto</button>
+        <button id="closeBtn" class="close-btn">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- PDF.js library -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+  
+  <script>
+    // Configure PDF.js worker
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+    
+    // DOM elements
+    const pdfFileInput = document.getElementById('pdfFile');
+    const extractBtn = document.getElementById('extractBtn');
+    const extractedTextArea = document.getElementById('extractedText');
+    const resultContainer = document.getElementById('resultContainer');
+    const statusMessage = document.getElementById('statusMessage');
+    const progressBar = document.getElementById('progressBar');
+    const copyBtn = document.getElementById('copyBtn');
+    const closeBtn = document.getElementById('closeBtn');
+    
+    // Event listeners
+    extractBtn.addEventListener('click', extractText);
+    copyBtn.addEventListener('click', copyText);
+    closeBtn.addEventListener('click', closeExtractor);
+    
+    // Extract text from PDF
+    async function extractText() {
+      const file = pdfFileInput.files[0];
+      if (!file) {
+        showStatus('Por favor, selecione um arquivo PDF.', 'error');
+        return;
+      }
+      
+      if (file.type !== 'application/pdf') {
+        showStatus('O arquivo selecionado não é um PDF.', 'error');
+        return;
+      }
+      
+      try {
+        extractBtn.disabled = true;
+        showStatus('Processando PDF, aguarde...', 'info');
+        
+        // Read the file
+        const arrayBuffer = await readFileAsArrayBuffer(file);
+        
+        // Load the PDF document
+        const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+        const pdf = await loadingTask.promise;
+        
+        // Get total pages
+        const numPages = pdf.numPages;
+        showStatus(`Extraindo texto de ${numPages} páginas...`, 'info');
+        
+        let fullText = '';
+        
+        // Extract text from each page
+        for (let i = 1; i <= numPages; i++) {
+          // Update progress
+          updateProgress(i, numPages);
+          
+          // Get the page
+          const page = await pdf.getPage(i);
+          const textContent = await page.getTextContent();
+          
+          // Extract text from the page
+          const pageText = textContent.items
+            .map(item => item.str)
+            .join(' ');
+          
+          fullText += pageText + '\n\n';
+        }
+        
+        // Display the extracted text
+        extractedTextArea.value = fullText;
+        resultContainer.style.display = 'block';
+        
+        // Show success message
+        showStatus(`Texto extraído com sucesso de ${numPages} páginas.`, 'success');
+        
+        // Send message to parent window if in iframe
+        if (window.parent !== window) {
+          window.parent.postMessage({
+            type: 'pdf-extracted',
+            content: fullText
+          }, '*');
+        }
+      } catch (error) {
+        console.error('Erro ao extrair texto:', error);
+        showStatus(`Erro ao processar o PDF: ${error.message}`, 'error');
+      } finally {
+        extractBtn.disabled = false;
+        updateProgress(100, 100); // Complete the progress bar
+      }
+    }
+    
+    // Read file as ArrayBuffer
+    function readFileAsArrayBuffer(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        
+        reader.onload = (e) => resolve(e.target.result);
+        reader.onerror = (e) => reject(new Error('Erro ao ler o arquivo'));
+        
+        reader.readAsArrayBuffer(file);
+      });
+    }
+    
+    // Show status message
+    function showStatus(message, type) {
+      statusMessage.textContent = message;
+      statusMessage.className = `status ${type}`;
+      statusMessage.style.display = 'block';
+    }
+    
+    // Update progress bar
+    function updateProgress(current, total) {
+      const percentage = (current / total) * 100;
+      progressBar.style.width = `${percentage}%`;
+    }
+    
+    // Copy extracted text to clipboard
+    function copyText() {
+      extractedTextArea.select();
+      document.execCommand('copy');
+      
+      // Show feedback
+      const originalText = copyBtn.textContent;
+      copyBtn.textContent = 'Copiado!';
+      
+      setTimeout(() => {
+        copyBtn.textContent = originalText;
+      }, 2000);
+    }
+    
+    // Close the extractor (when in iframe)
+    function closeExtractor() {
+      if (window.parent !== window) {
+        window.parent.postMessage({ type: 'close-pdf-extractor' }, '*');
+      } else {
+        resultContainer.style.display = 'none';
+        extractedTextArea.value = '';
+        statusMessage.style.display = 'none';
+        pdfFileInput.value = '';
+        updateProgress(0, 100);
+      }
+    }
+  </script>
+</body>
+</html>

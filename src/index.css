@@ -1,0 +1,451 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Lato:wght@300;400;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Open+Sans:wght@300;400;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+
+    --primary: 222.2 47.4% 11.2%;
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 222.2 84% 4.9%;
+
+    --radius: 0.5rem;
+
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 222.2 84% 4.9%;
+    --sidebar-primary: 222.2 47.4% 11.2%;
+    --sidebar-primary-foreground: 210 40% 98%;
+    --sidebar-accent: 210 40% 96.1%;
+    --sidebar-accent-foreground: 222.2 47.4% 11.2%;
+    --sidebar-border: 214.3 31.8% 91.4%;
+    --sidebar-ring: 222.2 84% 4.9%;
+
+    /* Custom brand/teal colors */
+    --brand-50: 170 75% 97%;
+    --brand-100: 172 70% 95%;
+    --brand-200: 176 65% 85%;
+    --brand-300: 175 60% 75%;
+    --brand-400: 174 55% 60%;
+    --brand-500: 173 58% 45%;
+    --brand-600: 173 65% 38%;
+    --brand-700: 172 70% 30%;
+    --brand-800: 172 75% 20%;
+    --brand-900: 170 80% 15%;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 210 40% 98%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 75.1%; /* Increased contrast from 65.1% to 75.1% */
+
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 212.7 26.8% 83.9%;
+
+    --sidebar-background: 230 19% 11%;
+    --sidebar-foreground: 210 40% 98%;
+    --sidebar-primary: 210 40% 98%;
+    --sidebar-primary-foreground: 222.2 47.4% 11.2%;
+    --sidebar-accent: 217.2 32.6% 18.5%;
+    --sidebar-accent-foreground: 210 40% 98%;
+    --sidebar-border: 217.2 32.6% 17.5%;
+    --sidebar-ring: 212.7 26.8% 83.9%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+/* Melhorias para textos no modo escuro */
+@layer utilities {
+  .dark-text-improved {
+    @apply dark:text-slate-100;
+  }
+  
+  .dark-text-muted {
+    @apply dark:text-slate-300;
+  }
+  
+  .dark-text-heading {
+    @apply dark:text-white;
+  }
+  
+  .dark-text-link {
+    @apply dark:text-brand-400 dark:hover:text-brand-300;
+  }
+  
+  .dark-bg-card {
+    @apply dark:bg-slate-800/90;
+  }
+}
+
+/* Animation classes */
+.animate-in .animate-fade-up,
+.animate-fade-up {
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 0.5s, transform 0.5s;
+}
+
+.animate-in.loaded .animate-fade-up,
+.loaded .animate-fade-up {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Delay classes */
+.delay-item-1 {
+  transition-delay: 0.1s;
+}
+
+.delay-item-2 {
+  transition-delay: 0.2s;
+}
+
+.delay-item-3 {
+  transition-delay: 0.3s;
+}
+
+.delay-item-4 {
+  transition-delay: 0.4s;
+}
+
+.delay-item-5 {
+  transition-delay: 0.5s;
+}
+
+.delay-item-6 {
+  transition-delay: 0.6s;
+}
+
+/* Glass panel styling */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(10px);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+}
+
+.dark .glass-panel {
+  background: rgba(30, 41, 59, 0.8);
+  border: 1px solid rgba(51, 65, 85, 0.6);
+}
+
+/* Button hover effect */
+.button-hover-effect {
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.button-hover-effect:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.dark .button-hover-effect:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+/* Font configuration */
+html, body {
+  font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+}
+
+.font-poppins {
+  font-family: 'Poppins', sans-serif;
+}
+
+/* Suporte Emocional page specific styling */
+.suporte-emocional-title {
+  color: #0a9396;
+  font-weight: 600;
+  font-size: 2.5rem;
+  letter-spacing: -0.02em;
+  font-family: 'Poppins', sans-serif;
+}
+
+.dark .suporte-emocional-title {
+  color: #2dd4bf;
+}
+
+.suporte-emocional-subtitle {
+  color: #555;
+  font-weight: 400;
+  max-width: 800px;
+  margin: 0 auto;
+  line-height: 1.6;
+  font-size: 1.1rem;
+  font-family: 'Poppins', sans-serif;
+}
+
+.dark .suporte-emocional-subtitle {
+  color: #94a3b8;
+}
+
+.heart-icon-container {
+  background-color: #e7f5f5;
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 1.5rem auto;
+}
+
+.dark .heart-icon-container {
+  background-color: rgba(42, 178, 169, 0.2);
+}
+
+/* Basic transitions for better loading */
+.transition-all {
+  transition-property: all;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 300ms;
+}
+
+.transition-opacity {
+  transition-property: opacity;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 300ms;
+}
+
+.opacity-0 {
+  opacity: 0;
+}
+
+.opacity-100 {
+  opacity: 1;
+}
+
+/* Animations for entrance and mobile menu */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.fade-in {
+  animation: fadeIn 0.5s ease-out forwards;
+}
+
+.slide-up {
+  animation: slideUp 0.5s ease-out forwards;
+}
+
+@layer components {
+  .equilibre-gradient {
+    background: linear-gradient(to right, rgba(0,182,148,0.9), rgba(108,74,182,0.9));
+  }
+  
+  .equilibre-text-gradient {
+    background: linear-gradient(to right, #00B694, #6C4AB6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  
+  .equilibre-gold-glow {
+    text-shadow: 0 0 10px rgba(234, 199, 132, 0.5);
+  }
+  
+  .equilibre-hero {
+    background-color: #0F0F0F;
+    background-image: radial-gradient(circle at 50% 50%, rgba(234, 199, 132, 0.15) 0%, rgba(15, 15, 15, 0.95) 70%);
+  }
+  
+  .equilibre-card {
+    border: 1px solid rgba(234, 199, 132, 0.2);
+    background: rgba(15, 15, 15, 0.7);
+    backdrop-filter: blur(8px);
+  }
+  
+  .equilibre-button {
+    background: #00B694;
+    transition: all 0.3s ease;
+  }
+  
+  .equilibre-button:hover {
+    background: #00a085;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 15px rgba(0, 182, 148, 0.3);
+  }
+  
+  .equilibre-icon {
+    background: rgba(234, 199, 132, 0.2);
+    color: #EAC784;
+  }
+  
+  .equilibre-section {
+    position: relative;
+    overflow: hidden;
+  }
+  
+  .equilibre-section::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-image: radial-gradient(circle at 20% 50%, rgba(108, 74, 182, 0.05) 0%, transparent 50%);
+    pointer-events: none;
+  }
+}
+
+/* Melhorias específicas para cartões no modo escuro */
+.dark .card-dark-improved {
+  @apply bg-slate-800/90 border-slate-700 text-slate-100;
+}
+
+.dark .card-title-dark {
+  @apply text-white font-semibold;
+}
+
+.dark .card-description-dark {
+  @apply text-slate-300;
+}
+
+.dark .text-label-dark {
+  @apply text-slate-400;
+}
+
+.dark .text-value-dark {
+  @apply text-slate-200 font-medium;
+}
+
+.dark .btn-dark-primary {
+  @apply bg-brand-500 hover:bg-brand-600 text-white;
+}
+
+.dark .btn-dark-secondary {
+  @apply bg-slate-700 hover:bg-slate-600 text-white border-slate-600;
+}
+
+/* Ajustes para melhorar o contraste no modo escuro */
+.dark-mode-high-contrast {
+  --foreground: 210 40% 98%;
+  --muted-foreground: 215 20.2% 80%;
+  --accent-foreground: 210 40% 98%;
+  --border: 217.2 32.6% 25%;
+}
+
+/* Better text contrast for dark mode */
+.dark .text-improved {
+  @apply text-white;
+}
+
+.dark .text-subtitle-improved {
+  @apply text-slate-300;
+}
+
+.dark .text-muted-improved {
+  @apply text-slate-400;
+}
+
+.dark .card-dark-improved {
+  @apply bg-slate-800 border-slate-700;
+}
+
+/* Supplement specific dark mode improvements */
+.dark .supplement-title {
+  @apply text-white font-semibold;
+}
+
+.dark .supplement-description {
+  @apply text-slate-300;
+}
+
+.dark .supplement-dosage {
+  @apply text-emerald-400;
+}
+
+.dark .supplement-info {
+  @apply text-slate-400;
+}
+
+.dark .supplement-card {
+  @apply bg-slate-800 border-slate-700;
+}
+
+/* Blue button styling */
+.blue-action-button {
+  @apply bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md flex items-center justify-center;
+}
+
+.blue-action-button svg {
+  @apply mr-2 h-4 w-4;
+}
+
+/* Mobile add button improvement */
+.mobile-add-button {
+  @apply bg-blue-500 rounded-md p-1 text-white;
+}
