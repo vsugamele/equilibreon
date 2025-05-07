@@ -49,17 +49,17 @@ const MobileNavbar = () => {
       path: '/emotional-support',
     },
     {
-      name: 'Suplementos',
-      icon: <Pill size={24} />,
-      path: '/supplements',
+      name: 'Fotos',
+      icon: <Camera size={24} />,
+      path: '/profile/photos',
     },
   ];
 
   const popoverItems = [
     {
-      name: 'Fotos de Progresso',
-      icon: <Camera size={18} />,
-      path: '/profile/photos',
+      name: 'Suplementos',
+      icon: <Pill size={18} />,
+      path: '/supplements',
     },
     {
       name: 'Exames e Análises',
