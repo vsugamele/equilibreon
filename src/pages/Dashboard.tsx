@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Navbar from '@/components/layout/Navbar';
 import Footer from '@/components/layout/Footer';
 import MobileNavbar from '@/components/layout/MobileNavbar';
-import { BarChart, Brain, CalendarDays, Clock, Dna, Heart, LineChart, MessageSquare, UserIcon, Camera, FileText, Pill, Dumbbell, Utensils, CalendarClock, MessageCircle, Droplet } from 'lucide-react';
+import { BarChart, Brain, CalendarDays, Clock, Dna, Heart, LineChart, MessageSquare, UserIcon, Camera, FileText, Pill, Dumbbell, Utensils, CalendarClock, MessageCircle, Droplet, Trophy, RefreshCw } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import CalorieAnalyzer from '@/components/nutrition/CalorieAnalyzer';
 import ExerciseTracker from '@/components/exercise/ExerciseTracker';
@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { scheduleNotifications } from '@/services/notificationService';
-import { useToast } from '@/hooks/use-toast';
+import { toast } from 'sonner';
 import ProgressSummary from '@/components/progress/ProgressSummary';
 import MealDetailsModal, { MealDetailsType } from '@/components/nutrition/MealDetailsModal';
 import AIGreeting from '@/components/dashboard/AIGreeting';
@@ -27,9 +27,10 @@ import MealTracker from '@/components/nutrition/MealTracker';
 const Dashboard = () => {
   const [currentDate] = useState(new Date());
   const [userName, setUserName] = useState<string>("");
-  const {
-    toast
-  } = useToast();
+  // const {
+  //   toast
+  // } = useToast();
+  // Agora usando toast diretamente da biblioteca sonner
   const isMobile = useIsMobile();
   
   // Função para buscar o perfil do usuário e obter o nome real
@@ -187,6 +188,62 @@ const Dashboard = () => {
     return 60;
   };
 
+  // Função para carregar o status das refeições do localStorage
+  const loadMealStatus = () => {
+    try {
+      // Obter a data atual no formato YYYY-MM-DD para usar como chave
+      const today = new Date().toISOString().split('T')[0];
+      const storedData = localStorage.getItem(`mealStatus_${today}`);
+      
+      if (storedData) {
+        const savedMeals = JSON.parse(storedData);
+        
+        // Atualizar o estado com os dados carregados
+        setTodaysMeals(currentMeals => {
+          // Mesclar os dados salvos com as refeições atuais
+          return currentMeals.map(meal => {
+            const savedMeal = savedMeals.find((m: any) => m.id === meal.id);
+            if (savedMeal) {
+              return { ...meal, status: savedMeal.status };
+            }
+            return meal;
+          });
+        });
+      }
+    } catch (error) {
+      console.error('Erro ao carregar status das refeições:', error);
+    }
+  };
+  
+  // Função para salvar o status das refeições no localStorage
+  const saveMealStatus = () => {
+    try {
+      // Obter a data atual no formato YYYY-MM-DD para usar como chave
+      const today = new Date().toISOString().split('T')[0];
+      
+      // Salvar apenas os IDs e status das refeições
+      const statusToSave = todaysMeals.map(meal => ({
+        id: meal.id,
+        status: meal.status
+      }));
+      
+      localStorage.setItem(`mealStatus_${today}`, JSON.stringify(statusToSave));
+    } catch (error) {
+      console.error('Erro ao salvar status das refeições:', error);
+    }
+  };
+  
+  // Efeito para carregar o status das refeições ao iniciar
+  useEffect(() => {
+    loadMealStatus();
+  }, []);
+  
+  // Efeito para salvar quando o status das refeições mudar
+  useEffect(() => {
+    saveMealStatus();
+  }, [todaysMeals]);
+
+  // Função para marcar uma refeição como concluída
   const handleMealCompleted = (mealId: number) => {
     // Usando 'completed' como status tipado corretamente
     setTodaysMeals(meals => meals.map(meal => {
@@ -195,6 +252,31 @@ const Dashboard = () => {
       }
       return meal;
     }));
+    
+    // Usar o toast da biblioteca sonner
+    toast('Refeição marcada como concluída!', {
+      description: 'A refeição foi adicionada ao seu diário.',
+      action: {
+        label: 'Desfazer',
+        onClick: () => handleUndoMealCompleted(mealId)
+      }
+    });
+  };
+  
+  // Função para desfazer a conclusão de uma refeição
+  const handleUndoMealCompleted = (mealId: number) => {
+    // Reverter o status para 'upcoming'
+    setTodaysMeals(meals => meals.map(meal => {
+      if (meal.id === mealId) {
+        return { ...meal, status: 'upcoming' as const };
+      }
+      return meal;
+    }));
+    
+    // Usar o toast da biblioteca sonner
+    toast('Status revertido com sucesso', {
+      description: 'A refeição foi marcada como pendente novamente.'
+    });
   };
 
   const TodaysMealsCard = () => {
@@ -216,11 +298,36 @@ const Dashboard = () => {
                 <p className="text-sm text-slate-500">{meal.time}</p>
                 <p className="font-medium text-slate-900">{meal.name}</p>
               </div>
-              {meal.status === 'completed' ? <Button variant="outline" size="sm" className="pointer-events-none">
-                  Concluído
-                </Button> : <MealDetailsModal meal={meal} onMealCompleted={handleMealCompleted} trigger={<Button size="sm" className="bg-teal-600 hover:bg-teal-700 text-white">
-                      Ver refeição
-                    </Button>} />}
+              {meal.status === 'completed' ? (
+                <div className="flex gap-2">
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="text-amber-600 border-amber-300 hover:bg-amber-50"
+                    onClick={() => handleUndoMealCompleted(meal.id)}
+                  >
+                    <RefreshCw className="h-4 w-4 mr-1" />
+                    Desfazer
+                  </Button>
+                  <MealDetailsModal 
+                    meal={meal} 
+                    onMealCompleted={() => {}} 
+                    onUndoMealCompleted={handleUndoMealCompleted}
+                    trigger={<Button size="sm" className="bg-green-600 hover:bg-green-700 text-white">
+                      Ver detalhes
+                    </Button>} 
+                  />
+                </div>
+              ) : (
+                <MealDetailsModal 
+                  meal={meal} 
+                  onMealCompleted={handleMealCompleted} 
+                  onUndoMealCompleted={handleUndoMealCompleted}
+                  trigger={<Button size="sm" className="bg-teal-600 hover:bg-teal-700 text-white">
+                    Ver refeição
+                  </Button>} 
+                />
+              )}
             </div>)}
         </div>
       </div>;
@@ -482,6 +589,22 @@ const Dashboard = () => {
           {!isMobile && <HealthSupportCards />}
           
           {isMobile && <div className="mb-8 grid grid-cols-1 gap-3">
+              <Card className="bg-indigo-50 border-none shadow p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-indigo-100 p-2 rounded-lg">
+                      <Camera className="h-5 w-5 text-indigo-600" />
+                    </div>
+                    <h3 className="text-indigo-700 font-semibold">Fotos de Progresso</h3>
+                  </div>
+                  <Button className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs h-8 px-3" asChild>
+                    <Link to="/profile/photos">
+                      Ver progresso
+                    </Link>
+                  </Button>
+                </div>
+              </Card>
+              
               <Card className="bg-pink-50 border-none shadow p-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
