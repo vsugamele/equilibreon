@@ -6,6 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ChevronLeft, Calendar, BarChart2, Droplet, Utensils } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import foodHistoryService from '@/services/foodHistoryService';
+import { getWaterHistory } from '@/services/waterHistoryService';
 
 // Interfaces para os dados de histórico
 interface HistoryDay {
@@ -75,9 +76,24 @@ const HistoryPage = () => {
   const fetchHistoryData = async () => {
     setIsLoading(true);
     try {
-      // Se usuário estiver autenticado, buscar do banco
+      // Obter dados do histórico de água
+      const waterHistory = getWaterHistory();
+      
+      // Criar um mapa para armazenar dados de hidratação por data
+      const waterByDate: Record<string, number> = {};
+      
+      // Processar os dados de hidratação
+      waterHistory.forEach(entry => {
+        if (entry.date && entry.consumed_ml) {
+          // Converter ml para copos (200ml por copo)
+          const glasses = Math.round(entry.consumed_ml / 200);
+          waterByDate[entry.date] = glasses;
+        }
+      });
+      
+      // Se usuário estiver autenticado, buscar dados de alimentos do banco
       if (session?.user) {
-        // Tentar obter dados do histórico
+        // Tentar obter dados do histórico de alimentos
         const foodHistory = await foodHistoryService.getHistory();
         if (foodHistory && foodHistory.length > 0) {
           setFoodRecords(foodHistory);
@@ -92,7 +108,7 @@ const HistoryPage = () => {
               groupedByDay[date] = {
                 date,
                 calories: 0,
-                water: 0, // Não temos dados reais de água, então deixamos como 0
+                water: waterByDate[date] || 0, // Usar dados reais de água se disponíveis
                 meals: 0 // Contamos cada registro como uma refeição
               };
             }
@@ -101,18 +117,53 @@ const HistoryPage = () => {
             groupedByDay[date].meals += 1;
           });
           
+          // Para datas que não têm registro de comida, mas têm de água
+          Object.keys(waterByDate).forEach(date => {
+            if (!groupedByDay[date]) {
+              groupedByDay[date] = {
+                date,
+                calories: 0,
+                water: waterByDate[date],
+                meals: 0
+              };
+            }
+          });
+          
           const historyArray = Object.values(groupedByDay).sort(
             (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
           );
           
           setHistoryData(historyArray);
         } else {
-          // Se não encontrar dados, gerar dados simulados
-          generateMockData();
+          // Se não encontrar dados de comida, usar apenas os dados de água se disponíveis
+          if (Object.keys(waterByDate).length > 0) {
+            const historyArray = Object.keys(waterByDate).map(date => ({
+              date,
+              calories: 0,
+              water: waterByDate[date],
+              meals: 0
+            })).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+            
+            setHistoryData(historyArray);
+          } else {
+            // Se não encontrar nenhum dado, gerar dados simulados
+            generateMockData();
+          }
         }
       } else {
-        // Se não estiver autenticado, usar dados simulados
-        generateMockData();
+        // Se não estiver autenticado, usar dados simulados, mas incluir dados reais de água
+        if (Object.keys(waterByDate).length > 0) {
+          const historyArray = Object.keys(waterByDate).map(date => ({
+            date,
+            calories: Math.floor(Math.random() * 1500) + 500, // Entre 500 e 2000 calorias
+            water: waterByDate[date],
+            meals: Math.floor(Math.random() * 4) + 1 // Entre 1 e 4 refeições
+          })).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+          
+          setHistoryData(historyArray);
+        } else {
+          generateMockData();
+        }
       }
     } catch (error) {
       console.error('Erro ao buscar histórico:', error);
