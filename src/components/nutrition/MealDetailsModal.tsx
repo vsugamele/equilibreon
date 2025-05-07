@@ -1,13 +1,28 @@
-
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger, DialogClose } from '@/components/ui/dialog';
-import { Utensils, Check, XCircle } from 'lucide-react';
-import { Textarea } from '@/components/ui/textarea';
-import { saveMealRecord } from '@/services/mealTrackingService';
-import { toast } from 'sonner';
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
+import { Textarea } from '@/components/ui/textarea';
+import { toast } from 'sonner'; // Corrigido import de toast
+import { saveMealRecord } from '@/services/mealTrackingService'; // Corrigido nome do serviço
+import { Check, Utensils, XCircle, Undo2 } from 'lucide-react';
+import { v4 as uuidv4 } from 'uuid';
 import CalorieAnalyzer from './CalorieAnalyzer';
+import { addConsumedCalories } from '@/services/calorieService';
+
+// Definição temporária do tipo NutritionData se não estiver disponível
+interface FoodItem {
+  name: string;
+}
+
+interface NutritionData {
+  calories?: number;
+  protein?: number;
+  carbs?: number;
+  fat?: number;
+  foodItems?: FoodItem[];
+  analysisSummary?: string;
+}
 
 export type MealType = 'breakfast' | 'lunch' | 'dinner' | 'snack';
 
@@ -27,21 +42,113 @@ export interface MealDetailsType {
 interface MealDetailsModalProps {
   meal: MealDetailsType;
   onMealCompleted: (mealId: number) => void;
+  onUndoMealCompleted?: (mealId: number) => void; // Função para desfazer a conclusão da refeição
   trigger?: React.ReactNode;
   className?: string; // Added className prop to the interface
 }
 
-const MealDetailsModal: React.FC<MealDetailsModalProps> = ({ meal, onMealCompleted, trigger, className }) => {
+const MealDetailsModal: React.FC<MealDetailsModalProps> = ({ meal, onMealCompleted, onUndoMealCompleted, trigger, className }) => {
   const [alternativeDescription, setAlternativeDescription] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [analyzedMealData, setAnalyzedMealData] = useState<NutritionData | null>(null);
+  const [isUndoing, setIsUndoing] = useState(false);
 
   const handleCompleteMeal = async () => {
     try {
+      // Se temos dados analisados, use-os para atualizar os macros da refeição
+      let mealCalories = meal.calories || 0;
+      
+      if (analyzedMealData) {
+        console.log('Confirmando refeição com dados analisados:', analyzedMealData);
+        mealCalories = analyzedMealData.calories || meal.calories || 0;
+        
+        const updatedMeal = {
+          ...meal,
+          calories: mealCalories,
+          protein: analyzedMealData.protein || meal.protein,
+          carbs: analyzedMealData.carbs || meal.carbs,
+          fat: analyzedMealData.fat || meal.fat,
+          foods: analyzedMealData.foodItems?.map(item => item.name) || meal.foods,
+          description: analyzedMealData.analysisSummary || meal.description
+        };
+        
+        // Opcionalmente, salvar os dados atualizados no banco de dados aqui
+        // await updateMealInDatabase(updatedMeal);
+      }
+      
+      // Verificar se as calorias já foram adicionadas pelo analisador
+      const caloriesAlreadyAdded = localStorage.getItem('calories-already-added') === 'true';
+      console.log('Calorias já foram adicionadas pelo analisador?', caloriesAlreadyAdded);
+      
+      // Adicionar as calorias ao contador apenas se ainda não foram adicionadas
+      if (mealCalories > 0 && !caloriesAlreadyAdded) {
+        try {
+          // Adicionar as calorias da refeição ao contador
+          const updatedCalorieData = addConsumedCalories(mealCalories);
+          console.log(`Adicionadas ${mealCalories} calorias ao contador. Novo total: ${updatedCalorieData.consumedCalories}`);
+          
+          // Adicionar diretamente ao localStorage para garantir a persistência imediata
+          const storedCalories = localStorage.getItem('nutri-mindflow-calories') || '0';
+          const newTotalCalories = parseInt(storedCalories) + mealCalories;
+          localStorage.setItem('nutri-mindflow-calories', newTotalCalories.toString());
+          
+          // Emitir evento para atualizar outros componentes
+          const event = new CustomEvent('calories-updated', {
+            detail: { calories: newTotalCalories }
+          });
+          console.log('Disparando evento calories-updated com valor:', newTotalCalories);
+          window.dispatchEvent(event);
+          
+          // Emitir outro evento para garantir compatibilidade
+          const mealAddedEvent = new CustomEvent('meal-added', {
+            detail: { mealCalories: mealCalories }
+          });
+          window.dispatchEvent(mealAddedEvent);
+        } catch (calorieError) {
+          console.error('Erro ao adicionar calorias ao contador:', calorieError);
+          // Continuar mesmo se falhar a adição de calorias
+        }
+      } else if (caloriesAlreadyAdded) {
+        console.log('Calorias já adicionadas anteriormente pelo analisador, pulando adição duplicada');
+      }
+      
+      // Limpar a flag para garantir que calorias não sejam duplicadas em futuras refeições
+      localStorage.removeItem('calories-already-added');
+      
       onMealCompleted(meal.id);
-      toast.success(`${meal.name} marcado como concluído!`);
+      toast(`${meal.name} marcado como concluído!`, {
+        description: mealCalories > 0 ? `${mealCalories} calorias adicionadas ao seu diário.` : undefined
+      });
     } catch (error) {
       console.error('Erro ao completar refeição:', error);
-      toast.error('Erro ao marcar refeição como concluída');
+      toast('Erro ao marcar refeição como concluída', {
+        description: 'Ocorreu um problema ao processar sua solicitação.'
+      });
+    }
+  };
+  
+  const handleUndoComplete = async () => {
+    try {
+      setIsUndoing(true);
+      
+      // Chamar a função onUndoMealCompleted se estiver disponível
+      if (onUndoMealCompleted) {
+        onUndoMealCompleted(meal.id);
+        toast.success(`Status de ${meal.name} revertido para pendente!`);
+      } else {
+        // Fallback para recarregar a página se a função não estiver disponível
+        toast.success(`Status de ${meal.name} revertido para pendente!`);
+        setTimeout(() => {
+          window.location.reload();
+        }, 1500);
+      }
+    } catch (error) {
+      console.error('Erro ao desfazer conclusão:', error);
+      toast('Erro ao reverter status da refeição', {
+        description: 'Ocorreu um problema ao processar sua solicitação.'
+      });
+    } finally {
+      setIsUndoing(false);
     }
   };
 
@@ -78,9 +185,16 @@ const MealDetailsModal: React.FC<MealDetailsModalProps> = ({ meal, onMealComplet
       });
 
       // Marcar a refeição original como concluída
+      localStorage.removeItem('calories-already-added');
+      
+      // Limpar a flag após concluir a refeição
+      localStorage.removeItem('calories-already-added');
+      
       onMealCompleted(meal.id);
       
-      toast.success('Refeição alternativa registrada com sucesso!');
+      toast.success("Refeição alternativa registrada com sucesso!", {
+        description: "Sua refeição alternativa foi registrada."
+      });
       setAlternativeDescription('');
     } catch (error) {
       console.error('Erro ao registrar refeição alternativa:', error);
@@ -99,7 +213,15 @@ const MealDetailsModal: React.FC<MealDetailsModalProps> = ({ meal, onMealComplet
   };
 
   return (
-    <Dialog>
+    <Dialog onOpenChange={(open) => {
+        // Se estiver tentando fechar e tivermos dados analisados, precisamos confirmar
+        if (!open && analyzedMealData) {
+          // Impedir o fechamento automático mantendo o modal aberto
+          return false;
+        }
+        // Caso contrário, permitir o comportamento padrão de abrir/fechar
+        return true;
+      }}>
       <DialogTrigger asChild>
         {trigger || (
           <Button className="bg-teal-600 hover:bg-teal-700">
@@ -192,8 +314,14 @@ const MealDetailsModal: React.FC<MealDetailsModalProps> = ({ meal, onMealComplet
                       </SheetDescription>
                     </SheetHeader>
                     <div className="mt-6">
-                      {/* Remove the presetMealType prop since it's not defined in CalorieAnalyzer */}
-                      <CalorieAnalyzer />
+                      <CalorieAnalyzer 
+                        presetMealType={meal.name}
+                        onAnalysisComplete={(analysisData) => {
+                          // Salvar os dados analisados para uso posterior
+                          setAnalyzedMealData(analysisData);
+                          toast.success("Análise concluída! Você pode confirmar a refeição com os novos dados.");
+                        }} 
+                      />
                     </div>
                   </SheetContent>
                 </Sheet>
@@ -220,17 +348,26 @@ const MealDetailsModal: React.FC<MealDetailsModalProps> = ({ meal, onMealComplet
                 disabled={isSubmitting}
               >
                 <Check className="h-4 w-4" />
-                Confirmar Refeição
+                {analyzedMealData ? 'Confirmar com Análise' : 'Confirmar Refeição'}
               </Button>
             </>
           ) : (
-            <div className="w-full">
+            <div className="w-full space-y-2">
               <div className="bg-green-50 p-2 rounded-md text-center">
                 <Check className="h-5 w-5 text-green-600 mx-auto mb-1" />
                 <p className="text-green-700 text-sm">Refeição já concluída</p>
               </div>
+              <Button 
+                className="w-full" 
+                variant="outline" 
+                onClick={handleUndoComplete}
+                disabled={isUndoing}
+              >
+                <Undo2 className="h-4 w-4 mr-2" />
+                {isUndoing ? 'Desfazendo...' : 'Desfazer Conclusão'}
+              </Button>
               <DialogClose asChild>
-                <Button className="w-full mt-2" variant="outline">
+                <Button className="w-full" variant="outline">
                   Fechar
                 </Button>
               </DialogClose>

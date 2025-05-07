@@ -3,8 +3,9 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Camera, Image as ImageIcon, Loader2, Upload, CheckCircle2 } from 'lucide-react';
-import { useToast } from '@/components/ui/use-toast';
+import { Camera, Image as ImageIcon, Loader2, Upload, CheckCircle2, ThumbsUp, ThumbsDown, Info } from 'lucide-react';
+import { toast } from 'sonner';
+import { Progress } from '@/components/ui/progress';
 import foodAnalysisService, { FoodAnalysisResult, FoodItem } from '@/services/foodAnalysisService';
 import { supabase } from '@/integrations/supabase/client';
 import { v4 as uuidv4 } from 'uuid';
@@ -12,6 +13,24 @@ import { MealRecordType } from '@/types/supabase';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { saveMealRecord } from '@/services/mealTrackingService';
 import personalizedNutritionService, { UserNutritionProfile, PersonalizedRecommendation } from '@/services/personalizedNutritionService';
+
+// Funções auxiliares para gerenciar calorias
+const getLocalCalories = (): number => {
+  const saved = localStorage.getItem('nutri-mindflow-calories');
+  return saved ? parseInt(saved) : 0;
+};
+
+const saveLocalCalories = (calories: number): void => {
+  localStorage.setItem('nutri-mindflow-calories', calories.toString());
+  
+  // Emitir eventos personalizados para sincronização que o CalorieTracker2 espera
+  const event = new CustomEvent('calories-updated', { 
+    detail: { calories } 
+  });
+  window.dispatchEvent(event);
+  
+  console.log(`[DEBUG] Salvando ${calories} calorias no localStorage e disparando evento`);
+};
 
 // Adaptando a interface NutritionData para usar os mesmos campos de FoodAnalysisResult
 interface NutritionData {
@@ -42,6 +61,7 @@ interface NutritionData {
 
 interface CalorieAnalyzerProps {
   presetMealType?: string;
+  onAnalysisComplete?: (analysisData: NutritionData) => void;
 }
 
 interface ComponentState {
@@ -56,9 +76,17 @@ interface ComponentState {
   userProfile: UserNutritionProfile | null;
   personalizedRecommendation: PersonalizedRecommendation | null;
   mealName?: string;
+  analysisStatus?: string;
+  analysisProgress?: number;
+  comparisonResult?: {
+    isGood: boolean;
+    feedback: string;
+    plannedCalories?: number;
+    actualCalories?: number;
+  } | null;
 }
 
-const CalorieAnalyzer: React.FC<CalorieAnalyzerProps> = ({ presetMealType }) => {
+const CalorieAnalyzer: React.FC<CalorieAnalyzerProps> = ({ presetMealType, onAnalysisComplete }) => {
   // Usar apenas o estado combinado
   const [state, setState] = useState<ComponentState>({
     isLoading: false,
@@ -71,11 +99,14 @@ const CalorieAnalyzer: React.FC<CalorieAnalyzerProps> = ({ presetMealType }) => 
     analysisHistory: [],
     userProfile: null,
     personalizedRecommendation: null,
-    mealName: presetMealType || ''
+    mealName: presetMealType || '',
+    analysisStatus: '',
+    analysisProgress: 0,
+    comparisonResult: null
   });
   const [showHistory, setShowHistory] = useState(false);
   const [mealName, setMealName] = useState(presetMealType || '');
-  const { toast } = useToast();
+  // Substituído useToast pelo toast do sonner
   const { user } = useAuth();
   
   // Função auxiliar para calcular percentual de calorias
@@ -151,9 +182,9 @@ const CalorieAnalyzer: React.FC<CalorieAnalyzerProps> = ({ presetMealType }) => 
       
       // Analisar a imagem para obter informações nutricionais
       setState(prev => ({ ...prev, isAnalyzing: true }));
-      toast({
-        title: "Analisando imagem",
-        description: "A IA está analisando sua imagem. Isso pode levar alguns segundos...",
+      // Usar o toast.message para compatibilidade com a API do sonner
+      toast.message("Analisando imagem", {
+        description: "A IA está analisando sua imagem. Isso pode levar alguns segundos..."
       });
       
       const result = await foodAnalysisService.analyzeImage(file);
@@ -198,8 +229,7 @@ const CalorieAnalyzer: React.FC<CalorieAnalyzerProps> = ({ presetMealType }) => 
         console.error('Erro ao salvar histórico:', storageError);
       }
       
-      toast({
-        title: "Análise concluída",
+      toast.success("Análise concluída", {
         description: "Sua imagem foi analisada com sucesso!"
       });
       
@@ -212,10 +242,8 @@ const CalorieAnalyzer: React.FC<CalorieAnalyzerProps> = ({ presetMealType }) => 
         error: error instanceof Error ? error.message : 'Erro desconhecido ao processar a imagem'
       }));
       
-      toast({
-        title: "Erro na análise",
-        description: error instanceof Error ? error.message : 'Erro desconhecido ao processar a imagem',
-        variant: "destructive"
+      toast.error("Erro na análise", {
+        description: error instanceof Error ? error.message : 'Erro desconhecido ao processar a imagem'
       });
     }
   };
@@ -226,11 +254,53 @@ const CalorieAnalyzer: React.FC<CalorieAnalyzerProps> = ({ presetMealType }) => 
     if (cameraInput) {
       cameraInput.click();
     } else {
-      toast({
-        title: "Erro ao acessar câmera",
-        description: "Não foi possível acessar a câmera do dispositivo.",
-        variant: "destructive",
+      toast.error("Erro ao acessar câmera", {
+        description: "Não foi possível acessar a câmera do dispositivo."
       });
+    }
+  };
+
+  const compareMealWithPlanned = async (nutritionData: NutritionData, mealType: string) => {
+    try {
+      // Em um cenário real, buscaríamos os dados do plano alimentar no banco de dados
+      // Para demonstração, vamos simular com os dados armazenados
+      const todaysMeals = JSON.parse(localStorage.getItem('todaysMeals') || '[]');
+      const plannedMeal = todaysMeals.find((meal: any) => 
+        meal.name?.toLowerCase().includes(mealType?.toLowerCase() || ''));
+      
+      if (!plannedMeal) return null;
+      
+      // Comparação básica de calorias
+      const plannedCalories = plannedMeal.calories || 0;
+      const actualCalories = nutritionData.calories;
+      const caloriesDiff = Math.abs(actualCalories - plannedCalories);
+      const caloriesWithinRange = caloriesDiff <= plannedCalories * 0.2; // 20% de margem
+      
+      // Comparar alimentos
+      const plannedFoods = plannedMeal.foods || [];
+      const actualFoods = nutritionData.foodItems.map(f => f.name.toLowerCase());
+      
+      let matchingFoods = 0;
+      plannedFoods.forEach((food: string) => {
+        if (actualFoods.some(actual => actual.includes(food.toLowerCase()))) {
+          matchingFoods++;
+        }
+      });
+      
+      const foodMatchRatio = plannedFoods.length > 0 ? matchingFoods / plannedFoods.length : 0;
+      const isGood = caloriesWithinRange && foodMatchRatio >= 0.4;
+      
+      return {
+        isGood,
+        feedback: isGood 
+          ? 'Sua refeição está próxima do planejado! Bom trabalho.' 
+          : 'Sua refeição está diferente do planejado. Verifique os nutrientes.',
+        plannedCalories,
+        actualCalories
+      };
+    } catch (error) {
+      console.error('Erro ao comparar refeições:', error);
+      return null;
     }
   };
 
@@ -246,26 +316,55 @@ const CalorieAnalyzer: React.FC<CalorieAnalyzerProps> = ({ presetMealType }) => 
     setState(prev => ({
       ...prev,
       isAnalyzing: true,
-      error: null
+      error: null,
+      analysisStatus: 'Iniciando análise...',
+      analysisProgress: 10
     }));
+    
+    // Mostrar toast de início de análise
+    toast.message('Analisando imagem', {
+      description: 'A IA está processando sua imagem...'
+    });
 
     try {
+      // Simular etapas do processo para melhor feedback
+      const steps = [
+        { status: 'Processando imagem...', progress: 20 },
+        { status: 'Detectando alimentos...', progress: 40 },
+        { status: 'Analisando nutrientes...', progress: 60 },
+        { status: 'Calculando valores...', progress: 80 }
+      ];
+      
+      // Atualizar progresso a cada etapa
+      for (const step of steps) {
+        setState(prev => ({
+          ...prev,
+          analysisStatus: step.status,
+          analysisProgress: step.progress
+        }));
+        
+        // Pequeno delay para simular o processamento
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+      
+      // Chamar a API de análise
       const response = await foodAnalysisService.analyzeImage(state.selectedFile);
       
       // Mapear a resposta para o formato esperado pelo componente
       const nutritionData: NutritionData = {
         foodName: response.foodName || 'Alimento analisado',
         dishName: response.dishName,
-        calories: response.calories || 0,
-        protein: response.protein || 0,
-        carbs: response.carbs || 0,
-        fat: response.fat || 0,
+        calories: response.calories,
+        protein: response.protein,
+        carbs: response.carbs,
+        fat: response.fat,
         fiber: response.fiber || 0,
-        sugar: response.sugar || 0,
-        sodium: response.sodium || 0,
+        sugar: response.sugar,
+        sodium: response.sodium,
         imageUrl: response.imageUrl,
         confidence: response.confidence || 0.8,
-        analysisSummary: `Análise de ${response.dishName || response.foodName || 'alimentos'} com pontuação de saúde ${response.healthScore}/10.`,
+        // Campos adicionais para o formato local
+        analysisSummary: `Análise de ${response.dishName || response.foodName} com pontuação de saúde ${response.healthScore}/10`,
         userRecommendations: response.userRecommendations || [],
         dietaryTags: response.dietaryTags || [],
         healthScore: response.healthScore || 5,
@@ -273,6 +372,12 @@ const CalorieAnalyzer: React.FC<CalorieAnalyzerProps> = ({ presetMealType }) => 
         foodItems: response.foodItems || [],
         categories: response.categories || []
       };
+      
+      // Comparar com a refeição planejada se houver presetMealType
+      let comparisonResult = null;
+      if (presetMealType) {
+        comparisonResult = await compareMealWithPlanned(nutritionData, presetMealType);
+      }
 
       // Gerar recomendações personalizadas se o usuário tiver um perfil
       if (state.userProfile) {
@@ -291,32 +396,45 @@ const CalorieAnalyzer: React.FC<CalorieAnalyzerProps> = ({ presetMealType }) => 
         }
       }
       
+      // Atualizar o estado com os resultados da análise
+      setState(prev => ({
+        ...prev,
+        nutritionData,
+        isAnalyzing: false,
+        analysisStatus: 'Análise concluída!',
+        analysisProgress: 100,
+        comparisonResult
+      }));
+      
+      // Notificar o componente pai se callback existir
+      if (onAnalysisComplete) {
+        onAnalysisComplete(nutritionData);
+      }
+      
       // Mostrar notificação de sucesso
-      toast({
-        title: "Análise concluída com sucesso!",
-        description: `Sua refeição (${nutritionData.foodName}) tem aproximadamente ${nutritionData.calories} calorias.`,
+      toast.success('Análise concluída!', {
+        description: `Refeição analisada: ${nutritionData.calories} calorias.`
       });
     } catch (error) {
-      console.error('Error analyzing image:', error);
+      console.error('Erro ao analisar imagem:', error);
       setState(prev => ({
         ...prev,
         error: 'Erro ao analisar a imagem. Por favor, tente novamente.',
-        isAnalyzing: false
+        isAnalyzing: false,
+        analysisStatus: '',
+        analysisProgress: 0
       }));
-      toast({
-        title: "Erro na análise",
-        description: "Houve um problema ao analisar sua imagem. Tente novamente.",
-        variant: "destructive",
+      
+      toast.error('Erro na análise', {
+        description: 'Houve um problema ao analisar sua imagem. Tente novamente.'
       });
     }
   };
 
   const handleSaveToMealLog = async () => {
     if (!state.nutritionData) {
-      toast({
-        title: "Sem análise",
-        description: "Por favor, analise uma imagem primeiro.",
-        variant: "destructive",
+      toast.error("Sem análise", {
+        description: "Por favor, analise uma imagem primeiro."
       });
       return;
     }
@@ -393,8 +511,7 @@ const CalorieAnalyzer: React.FC<CalorieAnalyzerProps> = ({ presetMealType }) => 
       
       // Salvar o registro no Supabase
       await saveMealRecord(mealRecord);
-      toast({
-        title: "Refeição salva!",
+      toast.success("Refeição salva!", {
         description: `${state.mealName || 'Refeição'} adicionada ao seu diário alimentar.`,
       });
         
@@ -402,10 +519,8 @@ const CalorieAnalyzer: React.FC<CalorieAnalyzerProps> = ({ presetMealType }) => 
       handleReset();
     } catch (error) {
       console.error('Erro ao salvar refeição:', error);
-      toast({
-        title: "Erro ao salvar",
-        description: "Não foi possível salvar a refeição no histórico.",
-        variant: "destructive"
+      toast.error("Erro ao salvar", {
+        description: "Não foi possível salvar a refeição no histórico."
       });
     } finally {
       setState(prev => ({ ...prev, isSaving: false }));
@@ -496,42 +611,191 @@ const CalorieAnalyzer: React.FC<CalorieAnalyzerProps> = ({ presetMealType }) => 
           </div>
         )}
       </div>
-      {state.nutritionData && (
-        <div className="mt-4 space-y-4">
-          <div className="space-y-4">
+      {state.isAnalyzing && (
+        <div className="mt-6 p-6 bg-gray-50 border border-gray-200 rounded-lg">
+          <div className="flex flex-col items-center justify-center space-y-4 text-center">
+            <Loader2 className="h-10 w-10 animate-spin text-primary" />
             <div>
-              <Label>Resumo da Análise</Label>
-              <p>
+              <p className="text-lg font-medium text-gray-700">{state.analysisStatus}</p>
+              <p className="text-sm text-gray-500">Por favor, aguarde enquanto analisamos sua refeição</p>
+            </div>
+            
+            {state.analysisProgress !== undefined && (
+              <div className="w-full max-w-md">
+                <Progress value={state.analysisProgress} className="h-2" />
+                <p className="mt-1 text-xs text-gray-500 text-right">{state.analysisProgress}%</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      
+      {state.nutritionData && (
+        <div className="mt-4 space-y-6">
+          <div className="space-y-5 p-5 border border-gray-200 rounded-lg bg-white">
+            <div>
+              <h3 className="text-lg font-medium mb-2">Resumo da Análise</h3>
+              <p className="text-gray-700">
                 {state.nutritionData.analysisSummary}
               </p>
             </div>
-            <div>
-              <Label>Calorias</Label>
-              <p>
-                {state.nutritionData.calories}
-              </p>
+            
+            {state.comparisonResult && (
+              <div className={`p-4 rounded-lg border ${state.comparisonResult.isGood ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'}`}>
+                <div className="flex items-start gap-3">
+                  {state.comparisonResult.isGood ? (
+                    <ThumbsUp className="h-6 w-6 text-green-600 mt-0.5" />
+                  ) : (
+                    <Info className="h-6 w-6 text-amber-600 mt-0.5" />
+                  )}
+                  <div>
+                    <p className={`font-medium ${state.comparisonResult.isGood ? 'text-green-800' : 'text-amber-800'}`}>
+                      {state.comparisonResult.isGood ? 'Refeição adequada' : 'Refeição diferente do planejado'}
+                    </p>
+                    <p className="text-sm mt-1">{state.comparisonResult.feedback}</p>
+                    {state.comparisonResult.plannedCalories !== undefined && (
+                      <div className="mt-2 text-sm space-y-1">
+                        <p>Calorias planejadas: {state.comparisonResult.plannedCalories} kcal</p>
+                        <p>Calorias detectadas: {state.nutritionData.calories} kcal</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            <div className="grid grid-cols-4 gap-3 text-center">
+              <div className="bg-purple-50 p-3 rounded-lg shadow-sm">
+                <p className="text-xl font-bold text-purple-700">{state.nutritionData.calories}</p>
+                <p className="text-xs font-medium text-purple-600">kcal</p>
+              </div>
+              <div className="bg-green-50 p-3 rounded-lg shadow-sm">
+                <p className="text-xl font-bold text-green-700">{state.nutritionData.protein}g</p>
+                <p className="text-xs font-medium text-green-600">Proteínas</p>
+              </div>
+              <div className="bg-orange-50 p-3 rounded-lg shadow-sm">
+                <p className="text-xl font-bold text-orange-700">{state.nutritionData.carbs}g</p>
+                <p className="text-xs font-medium text-orange-600">Carboidratos</p>
+              </div>
+              <div className="bg-blue-50 p-3 rounded-lg shadow-sm">
+                <p className="text-xl font-bold text-blue-700">{state.nutritionData.fat}g</p>
+                <p className="text-xs font-medium text-blue-600">Gorduras</p>
+              </div>
             </div>
+            
             <div>
-              <Label>Macronutrientes</Label>
-              <p>
-                Proteínas: {state.nutritionData.protein}g
-              </p>
-              <p>
-                Carboidratos: {state.nutritionData.carbs}g
-              </p>
-              <p>
-                Gorduras: {state.nutritionData.fat}g
-              </p>
-            </div>
-            <div>
-              <Label>Alimentos Detectados</Label>
-              <ul>
+              <h4 className="text-sm font-medium mb-2">Alimentos Detectados</h4>
+              <ul className="space-y-1">
                 {state.nutritionData.foodItems.map((item, index) => (
-                  <li key={index}>
-                    {item.name}
+                  <li key={index} className="flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4 text-green-500" />
+                    <span>{item.name}</span>
                   </li>
                 ))}
               </ul>
+            </div>
+            
+            <div className="pt-4 flex flex-col gap-3">
+              {/* Botão para adicionar calorias e preencher o texto alternativo */}
+              <button 
+                className="py-3 px-4 bg-green-600 hover:bg-green-700 text-white rounded-md font-medium text-sm"
+                onClick={() => {
+                  try {
+                    // Obter as calorias e dados da análise
+                    const calories = state.nutritionData?.calories || 0;
+                    if (calories <= 0) return;
+                    
+                    // Obter o valor atual do localStorage
+                    const storedValue = localStorage.getItem('nutri-mindflow-calories') || '0';
+                    const currentValue = parseInt(storedValue);
+                    
+                    // Adicionar as novas calorias
+                    const newValue = currentValue + calories;
+                    
+                    // Salvar no localStorage
+                    localStorage.setItem('nutri-mindflow-calories', newValue.toString());
+                    
+                    // Gerar descrição dos alimentos detectados
+                    const foodItems = state.nutritionData?.foodItems || [];
+                    const foodDescription = foodItems.map(item => item.name).join(', ');
+                    
+                    // Encontrar o textarea do "Comeu algo diferente?"
+                    const alternativeTextArea = document.querySelector('textarea[placeholder="Descreva o que você comeu..."]') as HTMLTextAreaElement;
+                    
+                    if (alternativeTextArea) {
+                      // Preencher automaticamente com os alimentos detectados
+                      alternativeTextArea.value = foodDescription || state.nutritionData?.dishName || state.nutritionData?.foodName || '';
+                      // Disparar evento para garantir que o React saiba da mudança
+                      const event = new Event('input', { bubbles: true });
+                      alternativeTextArea.dispatchEvent(event);
+                      console.log('Campo alternativo preenchido com:', foodDescription);
+                    }
+                    
+                    // Fechar o modal/drawer - tentar com diferentes abordagens
+                    // 1. Tentar encontrar o botão de fechar por vários seletores comuns
+                    let closeButton = document.querySelector('button[aria-label="Close"]') as HTMLButtonElement;
+                    if (!closeButton) closeButton = document.querySelector('.close-button') as HTMLButtonElement;
+                    if (!closeButton) closeButton = document.querySelector('[data-dismiss="modal"]') as HTMLButtonElement;
+                    if (!closeButton) closeButton = document.querySelector('.modal button:first-of-type') as HTMLButtonElement;
+                    
+                    // 2. Se encontrou algum botão, clicar nele
+                    if (closeButton) {
+                      closeButton.click();
+                      console.log('Botão de fechar encontrado e clicado');
+                    } else {
+                      console.log('Botão de fechar não encontrado, tentando abordagem alternativa');
+                      
+                      // 3. Forçar fechamento via ESC
+                      const escEvent = new KeyboardEvent('keydown', {
+                        key: 'Escape',
+                        code: 'Escape',
+                        keyCode: 27,
+                        which: 27,
+                        bubbles: true
+                      });
+                      document.dispatchEvent(escEvent);
+                    }
+                    
+                    // 4. Adicionar flag para evitar duplicação de calorias
+                    localStorage.setItem('calories-already-added', 'true');
+                    
+                    // 5. Após um curto período, tentar navegar para a página principal
+                    setTimeout(() => {
+                      const modal = document.querySelector('.modal') as HTMLElement;
+                      if (modal && modal.style.display !== 'none') {
+                        window.location.href = '/';
+                      }
+                    }, 300);
+                    
+                    // Mensagem de sucesso
+                    toast.success('Calorias adicionadas!', {
+                      description: `${calories} calorias foram adicionadas ao seu contador.`
+                    });
+                  } catch (error) {
+                    console.error('Erro ao adicionar calorias:', error);
+                    toast.error('Erro ao adicionar calorias', {
+                      description: 'Não foi possível atualizar o contador.'
+                    });
+                  }
+                }}
+              >
+                Adicionar Calorias ao Contador
+              </button>
+              
+              <Button 
+                variant="outline"
+                onClick={() => {
+                  setState(prev => ({
+                    ...prev,
+                    nutritionData: null,
+                    imagePreview: null,
+                    selectedFile: null,
+                    comparisonResult: null
+                  }));
+                }}
+              >
+                Analisar Outra Refeição
+              </Button>
             </div>
           </div>
         </div>
