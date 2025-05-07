@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Dumbbell, LineChart } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -9,6 +9,7 @@ import ExerciseTracker from '@/components/exercise/ExerciseTracker';
 import { Link } from 'react-router-dom';
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle, DrawerTrigger } from "@/components/ui/drawer";
 import { useIsMobile } from '@/hooks/use-mobile';
+import { getExerciseData } from '@/services/exerciseTrackingService';
 
 interface ExerciseGoalTrackerProps {
   goal?: number;
@@ -17,13 +18,42 @@ interface ExerciseGoalTrackerProps {
 }
 
 const ExerciseGoalTracker: React.FC<ExerciseGoalTrackerProps> = ({ 
-  goal = 150, 
-  current = 75,
+  goal: propGoal = 150, 
+  current: propCurrent = 75,
   unit = "minutos"
 }) => {
-  const progressPercentage = Math.min((current / goal) * 100, 100);
+  // Estado interno para armazenar os valores atuais de minutos e meta
+  const [current, setCurrent] = useState(propCurrent);
+  const [goal, setGoal] = useState(propGoal);
+  const [progressPercentage, setProgressPercentage] = useState(Math.min((propCurrent / propGoal) * 100, 100));
+  
   const isMobile = useIsMobile();
   const [open, setOpen] = useState(false);
+  
+  // Carregar dados iniciais do serviço
+  useEffect(() => {
+    const exerciseData = getExerciseData();
+    setCurrent(exerciseData.minutesCompleted);
+    setGoal(exerciseData.goalMinutes);
+    setProgressPercentage(Math.min((exerciseData.minutesCompleted / exerciseData.goalMinutes) * 100, 100));
+  }, []);
+  
+  // Adicionar listener para atualizar quando novos exercícios forem registrados
+  useEffect(() => {
+    const handleExerciseUpdate = (e: CustomEvent) => {
+      const { minutes } = e.detail;
+      setCurrent(minutes);
+      setProgressPercentage(Math.min((minutes / goal) * 100, 100));
+    };
+    
+    // Adicionar event listener
+    window.addEventListener('exercise-minutes-updated', handleExerciseUpdate as EventListener);
+    
+    // Cleanup: remover event listener
+    return () => {
+      window.removeEventListener('exercise-minutes-updated', handleExerciseUpdate as EventListener);
+    };
+  }, [goal]);
   
   return (
     <Card className="bg-white rounded-xl shadow-sm border border-slate-100 p-4">

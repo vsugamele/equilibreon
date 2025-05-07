@@ -14,6 +14,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/components/ui/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { addExerciseMinutes } from '@/services/exerciseTrackingService';
 
 // Exercise types with estimated METs (Metabolic Equivalent of Task)
 const exerciseTypes = [
@@ -166,8 +167,17 @@ const ExerciseTracker = () => {
       notes: newExercise.notes
     };
     
+    // Adicionar os minutos ao contador total usando o novo serviço
+    addExerciseMinutes(duration);
+    
     // Call the mutation to add the exercise
     addExerciseMutation.mutate(exercise);
+    
+    // Mostrar feedback sobre os minutos adicionados
+    toast({
+      title: "Exercício registrado",
+      description: `${duration} minutos adicionados ao seu contador semanal.`,
+    });
   };
   
   // Compute weekly goals based on exercises
