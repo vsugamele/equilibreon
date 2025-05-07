@@ -83,57 +83,86 @@ export const saveWaterHistory = async (): Promise<void> => {
     // Obter histórico existente
     const historyData = getWaterHistory();
     
-    // Verificar se já existe um registro para hoje
+    // A data de hoje no formato YYYY-MM-DD
     const todayStr = validRecord.date;
-    const existingIndex = historyData.findIndex(item => item.date === todayStr);
     
-    // Para evitar que apenas o registro do dia atual seja mantido,
-    // vamos garantir que os registros dos dias anteriores não sejam perdidos
-    
-    // Cria uma cópia do registro atual com nome do dia
+    // Criar o registro atualizado para hoje com o nome do dia
     const updatedRecord = {
       ...validRecord,
       day_name: getDayName(todayStr)
     };
     
+    // Verificar se já existe um registro para hoje
+    const existingIndex = historyData.findIndex(item => item.date === todayStr);
+    
+    // Criar um array de datas únicas para garantir que tenhamos dados para os últimos 7 dias
+    // mesmo que o usuário não tenha interagido com o app em alguns dias
+    const last7Days = generateLast7Days();
+    
     if (existingIndex >= 0) {
-      // Atualiza o registro existente
+      // Atualiza o registro existente para hoje
       historyData[existingIndex] = updatedRecord;
     } else {
       // Adiciona um novo registro para hoje
       historyData.unshift(updatedRecord);
-      
-      // Garantir que temos apenas um registro por dia
-      // Vamos ordenar por data (mais recente primeiro) e remover duplicatas
-      const uniqueDates = new Set<string>();
-      const uniqueHistoryData = historyData.filter(item => {
-        if (!uniqueDates.has(item.date)) {
-          uniqueDates.add(item.date);
-          return true;
-        }
-        return false;
-      });
-      
-      // Limitar a 7 dias enquanto preserva a ordem cronológica
-      if (uniqueHistoryData.length > 7) {
-        // Remover o dia mais antigo
-        uniqueHistoryData.pop();
-      }
-      
-      // Atualizar a variável historyData com os dados únicos
-      Object.assign(historyData, uniqueHistoryData);
     }
     
-    // Ordenar por data (mais recente primeiro) antes de salvar
-    historyData.sort((a, b) => {
+    // Criar um mapa com os dados históricos indexados por data
+    const historyMap = new Map<string, WaterHistoryEntry>();
+    
+    // Adicionar todos os registros existentes ao mapa
+    historyData.forEach(entry => {
+      historyMap.set(entry.date, entry);
+    });
+    
+    // Garantir que temos entradas para os últimos 7 dias
+    // Se não houver entrada para um dia, criar uma com valores zerados
+    last7Days.forEach(date => {
+      if (!historyMap.has(date)) {
+        historyMap.set(date, {
+          date,
+          day_name: getDayName(date),
+          target_ml: 3200, // Meta padrão
+          consumed_ml: 0    // Consumo zero
+        });
+      }
+    });
+    
+    // Converter o mapa de volta para array e ordenar por data (mais recente primeiro)
+    const updatedHistoryData = Array.from(historyMap.values()).sort((a, b) => {
       return new Date(b.date).getTime() - new Date(a.date).getTime();
     });
     
+    // Limitar a exatamente 7 dias
+    const last7DaysHistory = updatedHistoryData.slice(0, 7);
+    
     // Salvar histórico atualizado
-    localStorage.setItem(WATER_HISTORY_KEY, JSON.stringify(historyData));
+    localStorage.setItem(WATER_HISTORY_KEY, JSON.stringify(last7DaysHistory));
   } catch (error) {
     console.error('Erro ao salvar histórico de água:', error);
   }
+};
+
+/**
+ * Gera um array com as datas dos últimos 7 dias (incluindo hoje)
+ * no formato YYYY-MM-DD
+ */
+const generateLast7Days = (): string[] => {
+  const result: string[] = [];
+  const today = new Date();
+  
+  for (let i = 0; i < 7; i++) {
+    const date = new Date(today);
+    date.setDate(today.getDate() - i);
+    
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    
+    result.push(`${year}-${month}-${day}`);
+  }
+  
+  return result;
 };
 
 /**
