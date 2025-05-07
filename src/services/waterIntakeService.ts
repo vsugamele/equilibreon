@@ -56,17 +56,24 @@ export function glassesToMl(glasses: number): number {
 }
 
 /**
- * Obtém a data atual no formato YYYY-MM-DD considerando o fuso horário do Brasil (São Paulo)
+ * Obter a data atual no formato YYYY-MM-DD
  */
-function getCurrentDate(): string {
-  // Usar a data no fuso horário local (Brasil/São Paulo - UTC-3)
+export const getCurrentDate = (): string => {
+  // Usar data e hora local explícitas para evitar problemas com fuso horário
   const now = new Date();
+  
+  // Imprimir no console para debug
+  console.log('Data e hora atual:', now.toString());
+  
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const day = String(now.getDate()).padStart(2, '0');
   
-  return `${year}-${month}-${day}`;
-}
+  const formattedDate = `${year}-${month}-${day}`;
+  console.log('Data formatada:', formattedDate);
+  
+  return formattedDate;
+};
 
 /**
  * Busca ou cria um registro de consumo de água para a data atual

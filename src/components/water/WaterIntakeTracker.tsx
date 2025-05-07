@@ -152,14 +152,36 @@ const WaterIntakeTracker: React.FC<WaterIntakeTrackerProps> = ({ className }) =>
       if (isUpdatingRef.current) return;
       isUpdatingRef.current = true;
       
-      // Fazer a atualização real
+      // Primeiro atualizar a interface imediatamente para feedback visual
+      if (waterIntake) {
+        // Criar uma cópia otimista do estado atual
+        const optimisticUpdate = {
+          ...waterIntake,
+          consumed_ml: waterIntake.consumed_ml + 200
+        };
+        
+        // Atualizar o estado antes mesmo da operação assíncrona completar
+        setWaterIntake(optimisticUpdate);
+        
+        // Atualizar os valores estáveis para exibição
+        const newGlassCount = Math.floor(optimisticUpdate.consumed_ml / 200);
+        const newProgress = Math.round(Math.min((optimisticUpdate.consumed_ml / optimisticUpdate.target_ml) * 100, 100));
+        
+        // Atualizar os estados visuais imediatamente
+        setGlassCount(newGlassCount);
+        setProgress(newProgress);
+        stableGlassCountRef.current = newGlassCount;
+        stableProgressRef.current = newProgress;
+      }
+      
+      // Agora fazer a atualização real no serviço
       const updatedData = await addLocalWaterGlass();
       
       if (updatedData) {
         // Atualizar o estado com os dados reais (apenas uma vez)
         setWaterIntake(updatedData);
         
-        // Usar a função estabilizadora para evitar oscilações
+        // Usar a função estabilizadora para garantir sincronização
         updateStableValues(updatedData);
         
         // Salvar no histórico quando adicionar um copo

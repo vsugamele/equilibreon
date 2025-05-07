@@ -151,15 +151,22 @@ const generateLast7Days = (): string[] => {
   const result: string[] = [];
   const today = new Date();
   
+  console.log('Data atual no generateLast7Days:', today.toString());
+  
   for (let i = 0; i < 7; i++) {
+    // Clone a data atual para evitar modificar a original
     const date = new Date(today);
+    // Subtrair i dias da data atual
     date.setDate(today.getDate() - i);
     
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
     
-    result.push(`${year}-${month}-${day}`);
+    const formattedDate = `${year}-${month}-${day}`;
+    console.log(`Data ${i} dias atrás:`, formattedDate);
+    
+    result.push(formattedDate);
   }
   
   return result;

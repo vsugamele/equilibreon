@@ -1,14 +1,18 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
-import { Textarea } from '@/components/ui/textarea';
-import { toast } from 'sonner'; // Corrigido import de toast
-import { saveMealRecord } from '@/services/mealTrackingService'; // Corrigido nome do serviço
-import { Check, Utensils, XCircle, Undo2 } from 'lucide-react';
-import { v4 as uuidv4 } from 'uuid';
-import CalorieAnalyzer from './CalorieAnalyzer';
-import { addConsumedCalories } from '@/services/calorieService';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../ui/dialog";
+import { ScrollArea } from "../ui/scroll-area";
+import { Badge } from "../ui/badge";
+import { Clock, Check, Camera, CalendarIcon, ExternalLink, X } from "lucide-react";
+import { format } from "date-fns";
+import ptBR from "date-fns/locale/pt-BR";
+import { Separator } from "../ui/separator";
+import { Meal } from "@/types/nutrition";
+import CalorieAnalyzer from "./CalorieAnalyzer";
+import { NutritionData } from "@/types/nutritionData";
+import { addConsumedCalories } from "@/services/calorieService";
+import { toast } from "sonner";
+import foodHistoryService from "@/services/foodHistoryService";
 
 // Definição temporária do tipo NutritionData se não estiver disponível
 interface FoodItem {
@@ -57,23 +61,30 @@ const MealDetailsModal: React.FC<MealDetailsModalProps> = ({ meal, onMealComplet
     try {
       // Se temos dados analisados, use-os para atualizar os macros da refeição
       let mealCalories = meal.calories || 0;
+      let mealProtein = meal.protein || 0;
+      let mealCarbs = meal.carbs || 0;
+      let mealFat = meal.fat || 0;
+      let mealFoods = meal.foods || [];
+      let mealDescription = meal.description || '';
       
       if (analyzedMealData) {
         console.log('Confirmando refeição com dados analisados:', analyzedMealData);
         mealCalories = analyzedMealData.calories || meal.calories || 0;
+        mealProtein = analyzedMealData.protein || meal.protein || 0;
+        mealCarbs = analyzedMealData.carbs || meal.carbs || 0;
+        mealFat = analyzedMealData.fat || meal.fat || 0;
+        mealFoods = analyzedMealData.foodItems?.map(item => item.name) || meal.foods || [];
+        mealDescription = analyzedMealData.analysisSummary || meal.description || '';
         
         const updatedMeal = {
           ...meal,
           calories: mealCalories,
-          protein: analyzedMealData.protein || meal.protein,
-          carbs: analyzedMealData.carbs || meal.carbs,
-          fat: analyzedMealData.fat || meal.fat,
-          foods: analyzedMealData.foodItems?.map(item => item.name) || meal.foods,
-          description: analyzedMealData.analysisSummary || meal.description
+          protein: mealProtein,
+          carbs: mealCarbs,
+          fat: mealFat,
+          foods: mealFoods,
+          description: mealDescription
         };
-        
-        // Opcionalmente, salvar os dados atualizados no banco de dados aqui
-        // await updateMealInDatabase(updatedMeal);
       }
       
       // Verificar se as calorias já foram adicionadas pelo analisador
@@ -114,6 +125,33 @@ const MealDetailsModal: React.FC<MealDetailsModalProps> = ({ meal, onMealComplet
       
       // Limpar a flag para garantir que calorias não sejam duplicadas em futuras refeições
       localStorage.removeItem('calories-already-added');
+      
+      // Registrar a refeição no histórico de alimentação
+      try {
+        // Preparar os dados da refeição para salvar no histórico
+        const foodAnalysisResult = {
+          foodName: meal.name,
+          dishName: meal.name,
+          calories: mealCalories,
+          protein: mealProtein,
+          carbs: mealCarbs,
+          fat: mealFat,
+          fiber: 0,
+          confidence: 1,
+          analysisSummary: mealDescription,
+          foodItems: mealFoods.map(food => ({ name: food })),
+          analyzedAt: new Date().toISOString(),
+          categories: []
+        };
+        
+        // Salvar no histórico
+        console.log('Salvando refeição no histórico:', foodAnalysisResult);
+        await foodHistoryService.saveAnalysis(foodAnalysisResult);
+        console.log('Refeição salva com sucesso no histórico');
+      } catch (historyError) {
+        console.error('Erro ao salvar refeição no histórico:', historyError);
+        // Continuar mesmo se falhar o salvamento no histórico
+      }
       
       onMealCompleted(meal.id);
       toast(`${meal.name} marcado como concluído!`, {
