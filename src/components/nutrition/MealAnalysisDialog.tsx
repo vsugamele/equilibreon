@@ -155,16 +155,29 @@ const MealAnalysisDialog: React.FC<MealAnalysisDialogProps> = ({
         analysis.foodName = mealName;
       }
       
+      // Adicionar descrição alternativa se disponível
+      if (alternativeFood.trim()) {
+        analysis.description = alternativeFood.trim();
+      }
+      
       // Salvar a análise
       const saved = await saveMealAnalysis(analysis);
       
       if (saved) {
         // Marcar análise como confirmada localmente
-        const confirmedAnalysis = { ...analysis, confirmed: true };
+        const confirmedAnalysis = { 
+          ...analysis, 
+          confirmed: true,
+          // Garantir que os dados sejam transferidos corretamente
+          description: alternativeFood.trim() || analysis.description,
+          // Garantir que sugestedFoods seja uma array
+          suggestedFoods: analysis.suggestedFoods || []
+        };
         setAnalysis(confirmedAnalysis);
         
-        // Notificar componente pai
+        // Notificar componente pai com todos os dados necessários
         if (onMealConfirmed) {
+          console.log('Enviando dados completos para o modal anterior:', confirmedAnalysis);
           onMealConfirmed(confirmedAnalysis);
         }
         
@@ -174,6 +187,9 @@ const MealAnalysisDialog: React.FC<MealAnalysisDialogProps> = ({
         
         // Fechar diálogo
         onOpenChange(false);
+        
+        // Armazenar temporariamente os dados da análise para uso no modal anterior
+        localStorage.setItem('lastMealAnalysis', JSON.stringify(confirmedAnalysis));
       } else {
         toast.error("Erro ao salvar", {
           description: "Não foi possível salvar a análise. Tente novamente."
@@ -325,15 +341,21 @@ const MealAnalysisDialog: React.FC<MealAnalysisDialogProps> = ({
           /* Resultados da análise */
           <div className="space-y-4">
             <div className="flex justify-between items-center">
-              <h3 className="text-lg font-semibold">{analysis.foodName || mealName || 'Refeição'} - {new Date(analysis.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</h3>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setAnalysis(null)}
-                title="Analisar outra refeição"
-              >
-                <X className="h-4 w-4" />
-              </Button>
+              <div className="flex items-center space-x-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setAnalysis(null)}
+                  className="flex items-center space-x-1"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-arrow-left">
+                    <path d="m12 19-7-7 7-7"/>
+                    <path d="M19 12H5"/>
+                  </svg>
+                  <span>Voltar</span>
+                </Button>
+                <h3 className="text-lg font-semibold">{analysis.foodName || mealName || 'Refeição'} - {new Date(analysis.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</h3>
+              </div>
             </div>
             
             <p className="text-sm text-gray-700">
@@ -371,8 +393,27 @@ const MealAnalysisDialog: React.FC<MealAnalysisDialogProps> = ({
               <Textarea
                 placeholder="Descreva o que você comeu..."
                 className="h-20 mb-2"
+                value={alternativeFood}
+                onChange={(e) => setAlternativeFood(e.target.value)}
               />
-              <Button variant="outline" className="w-full mb-3">
+              <Button 
+                variant="outline" 
+                className="w-full mb-3" 
+                onClick={() => {
+                  // Salvar descrição alternativa
+                  if (alternativeFood.trim()) {
+                    // Atualizar a análise com a descrição alternativa
+                    const updatedAnalysis = {
+                      ...analysis,
+                      description: alternativeFood.trim()
+                    };
+                    setAnalysis(updatedAnalysis);
+                    toast.success("Descrição atualizada");
+                  }
+                  // Voltar para a tela de análise
+                  setAnalysis(null);
+                }}
+              >
                 Analisar outra refeição
               </Button>
             </div>

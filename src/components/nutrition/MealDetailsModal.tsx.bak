@@ -1,0 +1,991 @@
+import React, { useState, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter
+} from "../ui/dialog";
+import { ScrollArea } from "../ui/scroll-area";
+import { Badge } from "../ui/badge";
+import { Clock, Check } from "lucide-react";
+import { format } from "date-fns";
+import CalorieAnalyzer from "./CalorieAnalyzer";
+import { addConsumedCalories } from "@/services/calorieService";
+import { toast } from "sonner";
+import foodHistoryService from "@/services/foodHistoryService";
+
+// Funções de depuração temporárias 
+// Verifica se estamos em desenvolvimento
+const isDev = process.env.NODE_ENV !== 'production';
+
+const debugLog = (title: string, data: any, showInProduction = false) => {
+  if (isDev || showInProduction) {
+    console.log(`DEBUG: ${title}`, data);
+  }
+};
+
+const trackDebugEvent = (category: string, event: string, data: any = {}) => {
+  if (!isDev && !data.critical) return;
+  
+  console.log(`DEBUG EVENT [${category}]: ${event}`, data);
+  try {
+    // Salvar no localStorage para referência
+    const debugKey = `debug_${category}_${event}_${Date.now()}`;
+    localStorage.setItem(debugKey, JSON.stringify({
+      timestamp: new Date().toISOString(),
+      data
+    }));
+  } catch (e) {
+    console.error('Erro ao salvar evento de debug:', e);
+  }
+};
+
+const createDebugButton = () => {
+  if (!isDev) return;
+  
+  // Verificar se o botão já existe
+  if (document.getElementById('debug-button')) return;
+  
+  // Criar botão de depuração flutuante
+  const button = document.createElement('button');
+  button.id = 'debug-button';
+  button.innerText = '🔍 Debug';
+  button.style.position = 'fixed';
+  button.style.bottom = '20px';
+  button.style.right = '20px';
+  button.style.zIndex = '9999';
+  button.style.padding = '8px 12px';
+  button.style.background = '#333';
+  button.style.color = '#bada55';
+  button.style.border = 'none';
+  button.style.borderRadius = '4px';
+  button.style.cursor = 'pointer';
+  
+  // Ao clicar, mostra todos os dados de depuração no console
+  button.addEventListener('click', () => {
+    console.log('📊 DADOS DE DEPURAÇÃO:');
+    
+    // Filtrar as chaves do localStorage para obter apenas as de depuração
+    const debugKeys = Object.keys(localStorage).filter(key => key.startsWith('debug_'));
+    
+    // Mostrar cada categoria de dados
+    debugKeys.forEach(key => {
+      try {
+        const value = JSON.parse(localStorage.getItem(key) || '{}');
+        console.log(`${key.replace('debug_', '')}:`, value);
+      } catch (e) {
+        console.log(`${key.replace('debug_', '')}:`, localStorage.getItem(key));
+      }
+    });
+  });
+  
+  // Adicionar o botão ao documento
+  document.body.appendChild(button);
+};
+
+// Definição temporária do tipo NutritionData se não estiver disponível
+interface FoodItem {
+  name: string;
+  calories?: number;
+  portion?: string;
+}
+
+interface NutritionData {
+  calories?: number;
+  protein?: number;
+  carbs?: number;
+  fat?: number;
+  fiber?: number;
+  confidence?: number;
+  foodItems?: FoodItem[];
+  analysisSummary?: string;
+  foodName?: string;
+  dishName?: string;
+}
+
+export type MealType = 'breakfast' | 'lunch' | 'dinner' | 'snack';
+
+export interface MealDetailsType {
+  id: number;
+  time: string;
+  name: string;
+  status: 'upcoming' | 'completed';
+  description?: string;
+  foods?: string[];
+  calories?: number;
+  protein?: number;
+  carbs?: number;
+  fat?: number;
+}
+
+interface MealDetailsModalProps {
+  meal: MealDetailsType;
+  onMealCompleted: (mealId: number) => void;
+  onUndoMealCompleted?: (mealId: number) => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  className?: string;
+}
+
+const MealDetailsModal: React.FC<MealDetailsModalProps> = ({ 
+  meal, 
+  onMealCompleted, 
+  onUndoMealCompleted, 
+  open, 
+  onOpenChange, 
+  className = "" 
+}) => {
+  const [alternativeDescription, setAlternativeDescription] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [analyzedMealData, setAnalyzedMealData] = useState<NutritionData | null>(null);
+  const [isUndoing, setIsUndoing] = useState(false);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [hasJustAnalyzed, setHasJustAnalyzed] = useState(false); // Flag para rastrear se acaba de ser analisado
+  
+  // Função para processar o resultado da análise de IA
+  const handleAnalysisComplete = (data: NutritionData) => {
+    console.log('Resultado da análise recebido:', data);
+    setAnalyzedMealData(data);
+    setHasJustAnalyzed(true);
+    
+    // Se há alimentos detectados, preencher o campo de texto
+    if (data.foodItems && data.foodItems.length > 0) {
+      const foodItems = data.foodItems.map(item => item.name);
+      const descriptionText = foodItems.join(', ');
+      setAlternativeFoodText(descriptionText);
+      
+      console.log('Campo de texto preenchido com alimentos detectados:', {
+        foodItems,
+        descriptionText
+      });
+    }
+    
+    // Salvar os dados permanentemente no localStorage para persistir entre recarregamentos
+    try {
+      // Salvar análise da refeição atual
+      const mealAnalysisKey = `meal-analysis-${meal.id}`;
+      localStorage.setItem(mealAnalysisKey, JSON.stringify({
+        ...data,
+        mealId: meal.id,
+        mealType: meal.name,
+        timestamp: new Date().toISOString()
+      }));
+      console.log(`Análise de ${meal.name} salva permanentemente no localStorage`)
+      
+      // Adicionar ao histórico de análises
+      const savedHistoryString = localStorage.getItem('all-meal-analyses') || '[]';
+      const savedHistory = JSON.parse(savedHistoryString);
+      
+      // Adicionar à lista e manter apenas as 20 últimas análises
+      savedHistory.unshift({
+        ...data,
+        mealId: meal.id,
+        mealType: meal.name,
+        timestamp: new Date().toISOString()
+      });
+      
+      // Limitar a 20 itens para não sobrecarregar o localStorage
+      const updatedHistory = savedHistory.slice(0, 20);
+      localStorage.setItem('all-meal-analyses', JSON.stringify(updatedHistory));
+    } catch (error) {
+      console.error('Erro ao salvar análise no localStorage:', error);
+    }
+  };
+  
+  // Gerar sugestões de refeições com base no tipo de refeição e verificar dados da análise
+  // Usamos uma flag para evitar loops infinitos
+  const [initialDataLoaded, setInitialDataLoaded] = useState(false);
+  
+  useEffect(() => {
+    // Só carregar os dados uma vez na montagem do componente
+    if (!initialDataLoaded) {
+      // Verificar se há dados de análise recentes salvos
+      const savedAnalysis = localStorage.getItem('current-meal-analysis');
+      if (savedAnalysis) {
+        try {
+          const parsedAnalysis = JSON.parse(savedAnalysis);
+          // Verificar se os dados são recentes (menos de 5 minutos)
+          const timestamp = new Date(parsedAnalysis.timestamp).getTime();
+          const now = new Date().getTime();
+          const fiveMinutesInMs = 5 * 60 * 1000;
+          
+          if (now - timestamp < fiveMinutesInMs) {
+            console.log('Carregando dados da análise recente:', parsedAnalysis);
+            setAnalyzedMealData({
+              calories: parsedAnalysis.calories || 0,
+              protein: parsedAnalysis.protein || 0,
+              carbs: parsedAnalysis.carbs || 0,
+              fat: parsedAnalysis.fat || 0,
+              fiber: 0,
+              confidence: 1,
+              foodItems: parsedAnalysis.foodItems || [],
+              analysisSummary: parsedAnalysis.description
+            });
+            if (parsedAnalysis.description) {
+              setAlternativeFoodText(parsedAnalysis.description);
+            }
+          } else {
+            // Remover dados antigos
+            localStorage.removeItem('current-meal-analysis');
+            generateSuggestionsBasedOnMealType(meal.name);
+          }
+        } catch (e) {
+          console.error('Erro ao carregar dados da análise:', e);
+          localStorage.removeItem('current-meal-analysis');
+          generateSuggestionsBasedOnMealType(meal.name);
+        }
+      } else {
+        generateSuggestionsBasedOnMealType(meal.name);
+      }
+      
+      // Marcar que os dados iniciais foram carregados
+      setInitialDataLoaded(true);
+    }
+  }, [meal.name, initialDataLoaded]);
+  
+  // Função para gerar sugestões de alimentos com base no tipo de refeição
+  const generateSuggestionsBasedOnMealType = (mealType: string) => {
+    let newSuggestions: string[] = [];
+    
+    // Café da manhã
+    if (mealType.toLowerCase().includes('café') || mealType.toLowerCase().includes('cafe')) {
+      newSuggestions = [
+        "2 ovos mexidos",
+        "1 fatia de pão integral",
+        "1 fruta",
+        "Café preto ou chá verde"
+      ];
+    }
+    // Almoço
+    else if (mealType.toLowerCase().includes('almoço') || mealType.toLowerCase().includes('almoco')) {
+      newSuggestions = [
+        "150g de proteína (frango, peixe ou carne)",
+        "2 colheres de arroz integral",
+        "Feijão",
+        "Salada verde",
+        "Legumes ao vapor"
+      ];
+    }
+    // Jantar
+    else if (mealType.toLowerCase().includes('jantar')) {
+      newSuggestions = [
+        "150g de peixe assado",
+        "Legumes vapor",
+        "1 batata doce pequena",
+        "Salada"  
+      ];
+    }
+    // Lanche
+    else if (mealType.toLowerCase().includes('lanche')) {
+      newSuggestions = [
+        "1 iogurte grego sem açúcar",
+        "1 punhado de castanhas",
+        "1 fruta média",
+        "Chá de ervas"
+      ];
+    }
+    
+    setSuggestions(newSuggestions);
+  };
+
+  const handleCompleteMeal = async () => {
+    try {
+      setIsSubmitting(true);
+      
+      // Adicionar botão de debug à interface
+      createDebugButton();
+      
+      // Registrar evento de início da confirmação
+      trackDebugEvent('meal_confirmation', 'start', {
+        mealId: meal.id,
+        mealName: meal.name,
+        mealStatus: meal.status,
+        hasAnalyzedData: !!analyzedMealData
+      });
+      
+      let mealCalories = analyzedMealData?.calories || meal.calories || 0;
+      let mealProtein = analyzedMealData?.protein || meal.protein || 0;
+      let mealCarbs = analyzedMealData?.carbs || meal.carbs || 0;
+      let mealFat = analyzedMealData?.fat || meal.fat || 0;
+      
+      // Se não houver calorias definidas, mas estamos confirmando usando as sugestões,
+      // atribuir valores padrão de calorias com base no tipo de refeição
+      if (mealCalories <= 0) {
+        const mealType = meal.name.toLowerCase();
+        if (mealType.includes('café')) {
+          mealCalories = 350; // Café da manhã padrão
+          mealProtein = 15;
+          mealCarbs = 45;
+          mealFat = 12;
+        } else if (mealType.includes('almoço')) {
+          mealCalories = 650; // Almoço padrão
+          mealProtein = 30;
+          mealCarbs = 75;
+          mealFat = 20;
+        } else if (mealType.includes('jantar')) {
+          mealCalories = 450; // Jantar padrão
+          mealProtein = 25;
+          mealCarbs = 50;
+          mealFat = 15;
+        } else {
+          mealCalories = 200; // Lanche/snack padrão
+          mealProtein = 10;
+          mealCarbs = 25;
+          mealFat = 8;
+        }
+        console.log(`Não há calorias definidas, usando valores padrão para ${mealType}: ${mealCalories} kcal`);
+      }
+      
+      // Adiciona os alimentos da análise ou usa os existentes
+      let mealFoods = [];
+      
+      console.log('Determinando alimentos consumidos:');
+      console.log('- AnalyzedMealData:', analyzedMealData?.foodItems?.map(item => item.name));
+      console.log('- AlternativeFoodText:', alternativeFoodText);
+      console.log('- Meal.foods:', meal.foods);
+      
+      // IMPORTANTE: Verifica explicitamente se os dados são provenientes de uma análise real
+      const currentMealAnalysis = localStorage.getItem('current-meal-analysis');
+      const isFromAIAnalysis = analyzedMealData && currentMealAnalysis !== null;
+      
+      debugLog('Depuração de Alimentos Consumidos', {
+        isFromAIAnalysis,
+        currentMealAnalysis: currentMealAnalysis ? JSON.parse(currentMealAnalysis) : null,
+        analyzedMealData,
+        alternativeFoodText,
+        mealFoods: meal.foods
+      }, true);
+      
+      trackDebugEvent('meal_foods_detection', 'analysis_check', {
+        isFromAIAnalysis,
+        hasAnalyzedData: !!analyzedMealData,
+        hasFoodItems: analyzedMealData?.foodItems?.length > 0,
+        hasAlternativeText: !!alternativeFoodText,
+        currentMealAnalysisExists: currentMealAnalysis !== null
+      });
+      
+      // Priorizar alimentos detectados na análise - Com prioridade absoluta caso seja de IA
+      if (analyzedMealData?.foodItems && analyzedMealData.foodItems.length > 0) {
+        const foodItems = analyzedMealData.foodItems.map(item => item.name);
+        debugLog('Usando alimentos da análise de IA', foodItems, true);
+        trackDebugEvent('meal_foods_detection', 'using_ai_analysis', { foodItems });
+        mealFoods = foodItems;
+      } 
+      // Se não houver análise, mas o usuário digitou algo, usar isso
+      else if (alternativeFoodText && alternativeFoodText.trim() !== '') {
+        const foodItems = alternativeFoodText.split(',').map(item => item.trim()).filter(item => item !== '');
+        debugLog('Usando alimentos do campo de texto', foodItems, true);
+        trackDebugEvent('meal_foods_detection', 'using_text_input', { foodItems });
+        mealFoods = foodItems;
+      } 
+      // Por último, usar os alimentos existentes da refeição se houver
+      else if (meal.foods && meal.foods.length > 0) {
+        debugLog('Usando alimentos existentes da refeição', meal.foods, true);
+        trackDebugEvent('meal_foods_detection', 'using_existing_foods', { foodItems: meal.foods });
+        mealFoods = [...meal.foods];
+      }
+      
+      // MODIFICADO: Somente usar alimentos padrão se não for uma análise de IA e não houver alimentos informados
+      if (!isFromAIAnalysis && mealFoods.length === 0) {
+        console.log('Sem alimentos detectados, usando valores padrão baseados no tipo de refeição');
+        const mealType = meal.name.toLowerCase();
+        
+        if (mealType.includes('café')) {
+          mealFoods = ['Café com leite', 'Pão integral com queijo', 'Banana'];
+        } else if (mealType.includes('almoço')) {
+          mealFoods = ['Arroz integral', 'Feijão', 'Peito de frango grelhado', 'Salada verde'];
+        } else if (mealType.includes('jantar')) {
+          mealFoods = ['Sopa de legumes', 'Omelete', 'Chá de camomila'];
+        } else {
+          mealFoods = ['Iogurte natural', 'Granola', 'Fruta fresca'];
+        }
+      }
+      
+      // Usa o texto que o usuário digitou ou mantém a descrição original
+      let mealDescription = '';
+      if (alternativeFoodText && alternativeFoodText.trim() !== '') {
+        mealDescription = alternativeFoodText.trim();
+        // Adiciona os alimentos manualmente especificados se não vier da análise
+        if (mealFoods.length === 0 && mealDescription) {
+          mealFoods = mealDescription.split(',').map(item => item.trim());
+        }
+      } else if (analyzedMealData?.analysisSummary) {
+        mealDescription = analyzedMealData.analysisSummary;
+      } else if (meal.description) {
+        mealDescription = meal.description;
+      }
+
+      // Adicionar calorias ao contador - SEMPRE adicionar quando confirmar a refeição
+      // Independente se veio da análise ou da confirmação manual
+      let updatedCalorieData = null;
+      if (mealCalories > 0) {
+        try {
+          // IMPORTANTE: Vamos sempre adicionar as calorias ao confirmar a refeição
+          // pois essa é a confirmação final do usuário
+          console.log(`Adicionando ${mealCalories} calorias ao contador...`);
+          
+          // Adicionar as calorias ao contador usando o serviço
+          updatedCalorieData = addConsumedCalories(mealCalories);
+          console.log(`Adicionadas ${mealCalories} calorias ao contador. Novo total: ${updatedCalorieData.consumedCalories}`);
+          
+          // Forçar a atualização da interface do contador de calorias
+          if (typeof forceUpdateCalorieCounter === 'function') {
+            forceUpdateCalorieCounter();
+          }
+          
+          // IMPORTANTE: Forçar a atualização imediata através de um evento
+          const event = new CustomEvent('meal-completed', {
+            detail: { 
+              mealId: meal.id,
+              calories: mealCalories,
+              foods: mealFoods,
+              timestamp: new Date().toISOString()
+            }
+          });
+          window.dispatchEvent(event);
+          
+          // Forçar atualização via localStorage também (backup se o serviço falhar)
+          const currentCalories = localStorage.getItem('nutri-mindflow-calories') || '0';
+          const newCalories = parseInt(currentCalories) + mealCalories;
+          localStorage.setItem('nutri-mindflow-calories', newCalories.toString());
+          
+          // Emitir outro evento para forçar atualização de todos os componentes
+          const updateEvent = new CustomEvent('calories-updated', { 
+            detail: { calories: newCalories } 
+          });
+          window.dispatchEvent(updateEvent);
+        } catch (calorieError) {
+          console.error('Erro ao adicionar calorias ao contador:', calorieError);
+          // Fallback se o serviço falhar
+          try {
+            const currentCalories = localStorage.getItem('nutri-mindflow-calories') || '0';
+            const newCalories = parseInt(currentCalories) + mealCalories;
+            localStorage.setItem('nutri-mindflow-calories', newCalories.toString());
+            console.log('Calorias adicionadas via fallback localStorage:', newCalories);
+          } catch (e) {
+            console.error('Erro total ao adicionar calorias:', e);
+          }
+        }
+      } else {
+        console.warn('Nenhuma caloria para adicionar - valor é zero ou negativo');
+      }
+
+      // Notificar o componente pai que a refeição foi concluída
+      // e passar os dados atualizados
+      const updatedMeal = {
+        ...meal,
+        calories: mealCalories,
+        protein: mealProtein,
+        carbs: mealCarbs,
+        fat: mealFat,
+        foods: mealFoods,
+        description: mealDescription
+      };
+      
+      // Tentar salvar os dados no serviço de histórico de alimentos
+      try {
+        // Se o serviço de histórico de alimentos estiver disponível
+        if (typeof foodHistoryService?.saveAnalysis === 'function') {
+          // Obter o ID do usuário atual, ou usar um UUID v4 se não estiver disponível
+          const userId = localStorage.getItem('user-id') || 'anonymous';
+          
+          const foodHistoryData = {
+            mealId: meal.id.toString(),
+            userId: userId,
+            mealType: meal.name.toLowerCase(),
+            description: mealDescription,
+            calories: mealCalories,
+            protein: mealProtein,
+            carbs: mealCarbs,
+            fat: mealFat,
+            // Adicionar campos obrigatórios para o tipo FoodAnalysisResult
+            fiber: 0, // valor padrão
+            confidence: 0.9, // valor padrão alto para confirmação manual
+            foodItems: mealFoods.map(food => ({ 
+              name: food,
+              calories: Math.round(mealCalories / mealFoods.length), // distribui as calorias
+              portion: "1 porção" // valor padrão para a porção
+            })),
+            timestamp: new Date().toISOString(),
+            analysisSummary: mealDescription,
+            foodName: mealFoods.join(', '), // junta todos os alimentos como nome
+            dishName: meal.name, // nome da refeição como nome do prato
+            id: Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15) // Gerando um ID único para este registro
+          };
+          
+          // Registrar o que está sendo salvo no histórico para depuração
+          debugLog('Dados a serem salvos no histórico', {
+            foodHistoryData,
+            mealFoods,
+            originalAnalysis: analyzedMealData,
+            alternativeFoodText
+          }, true);
+          
+          trackDebugEvent('meal_history_save', 'save_attempt', {
+            mealType: meal.name,
+            foodCount: mealFoods.length,
+            foodItems: mealFoods,
+            calories: mealCalories,
+            fromAIAnalysis: !!analyzedMealData?.foodItems?.length
+          });
+          
+          try {
+            await foodHistoryService.saveAnalysis(foodHistoryData);
+            
+            debugLog('Dados salvos com sucesso no histórico de alimentos', foodHistoryData, true);
+            trackDebugEvent('meal_history_save', 'save_success', { id: foodHistoryData.id });
+            
+            // Salvar uma cópia dos dados para depuração
+            localStorage.setItem('debug_last_saved_meal', JSON.stringify({
+              savedAt: new Date().toISOString(),
+              data: foodHistoryData
+            }));
+          } catch (apiError) {
+            console.error('Erro ao chamar a API de salvamento:', apiError);
+            trackDebugEvent('meal_history_save', 'save_error', { error: String(apiError) });
+          }
+        }
+      } catch (saveError) {
+        console.error('Erro ao salvar no histórico de alimentos:', saveError);
+        trackDebugEvent('meal_history_save', 'unexpected_error', { error: String(saveError) });
+        // Não interrompe o fluxo principal - apenas loga o erro
+      }
+      
+      onMealCompleted(meal.id);
+      
+      toast.success(`${meal.name} marcado como concluído!`, {
+        description: mealCalories > 0 ? `${mealCalories} calorias adicionadas ao seu diário.` : undefined
+      });
+      
+      // Limpar os dados da análise após confirmar
+      setAnalyzedMealData(null);
+      setAlternativeFoodText('');
+      
+      // Limpar dados salvos no localStorage
+      localStorage.removeItem('current-meal-analysis');
+      localStorage.removeItem('calories-already-added');
+      
+    } catch (error) {
+      console.error('Erro ao completar refeição:', error);
+      toast.error('Erro ao marcar refeição como concluída', {
+        description: 'Ocorreu um problema ao processar sua solicitação.'
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleUndoComplete = async () => {
+    if (!onUndoMealCompleted) return;
+
+    try {
+      setIsUndoing(true);
+      onUndoMealCompleted(meal.id);
+
+      toast(`${meal.name} desmarcado com sucesso`, {
+        description: "A refeição foi retornada para 'pendente'."
+      });
+    } catch (error) {
+      console.error('Erro ao desfazer conclusão da refeição:', error);
+      toast('Erro ao desfazer', {
+        description: 'Não foi possível desfazer a conclusão da refeição.'
+      });
+    } finally {
+      setIsUndoing(false);
+    }
+  };
+
+  const [showAnalyzer, setShowAnalyzer] = useState(false);
+  const [alternativeFoodText, setAlternativeFoodText] = useState('');
+
+  // Função para forçar a atualização do contador na interface
+  const forceUpdateCalorieCounter = () => {
+    // Despacha um evento personalizado que o CalorieTracker2 escuta
+    const event = new CustomEvent('calories-updated', { 
+      detail: { calories: Date.now() } // Usando timestamp para garantir que seja um valor novo
+    });
+    window.dispatchEvent(event);
+    console.log('Evento calories-updated disparado para forçar atualização do contador');
+  };
+
+  // Carregar dados quando o modal abrir
+  useEffect(() => {
+    if (open) {
+      // Executar ações ao abrir o modal, como carregar sugestões
+      generateSuggestionsBasedOnMealType(meal.name);
+      
+      // Verificar se há uma análise salva para esta refeição
+      const savedAnalysisKey = `meal-analysis-${meal.id}`;
+      const savedAnalysis = localStorage.getItem(savedAnalysisKey);
+      
+      if (savedAnalysis) {
+        try {
+          const parsedAnalysis = JSON.parse(savedAnalysis);
+          setAnalyzedMealData(parsedAnalysis);
+        } catch (err) {
+          console.error('Erro ao carregar análise salva:', err);
+        }
+      }
+    }
+  }, [open, meal.id, meal.name]);
+  
+  return (
+    <Dialog
+      open={open} 
+      onOpenChange={onOpenChange}
+    >
+      <DialogContent className={`max-w-md ${className}`}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center">
+            <div className="flex-1">{meal.name}</div>
+            <Badge className="ml-2 bg-blue-100 text-blue-800 hover:bg-blue-200">
+              <Clock className="h-3 w-3 mr-1" /> {meal.time}
+            </Badge>
+          </DialogTitle>
+          <DialogDescription>
+            {meal.description || `Detalhes da refeição ${meal.name}`}
+          </DialogDescription>
+        </DialogHeader>
+
+        <ScrollArea className="max-h-80 mt-4">
+          <div className="space-y-4">
+            {showAnalyzer ? (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between mb-2">
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="flex items-center space-x-1 text-gray-700"
+                    onClick={() => setShowAnalyzer(false)}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-arrow-left">
+                      <path d="m12 19-7-7 7-7"/>
+                      <path d="M19 12H5"/>
+                    </svg>
+                    <span>Voltar</span>
+                  </Button>
+                  <h3 className="font-medium">Analisando sua refeição</h3>
+                  <div className="w-20"></div> {/* Espaçador para centralizar o título */}
+                </div>
+                <CalorieAnalyzer
+                  onAnalysisComplete={(data) => {
+                    const handleCompleteMeal = async () => {
+                      if (isSubmitting) return;
+                      setIsSubmitting(true);
+                      
+                      try {
+                        // Capturar os dados usados para completar a refeição
+                        const description = alternativeFoodText || meal.description;
+                        const completeTime = new Date().toISOString();
+                        
+                        // Criar objeto com dados da refeição
+                        const mealData = {
+                          mealId: meal.id,
+                          mealType: meal.name.toLowerCase(),
+                          description,
+                          completedAt: completeTime,
+                        };
+                        
+                        debugLog('Dados da refeição para completar', mealData);
+                        
+                        // Verificar se há dados de análise 
+                        const currentMealAnalysis = localStorage.getItem('current-meal-analysis');
+                        let analysisData = null;
+                        let hasAnalysisData = false;
+                        
+                        // Se tivermos dados da análise, usar eles 
+                        if (currentMealAnalysis) {
+                          try {
+                            analysisData = JSON.parse(currentMealAnalysis);
+                            hasAnalysisData = true;
+                            
+                            debugLog('Dados da análise encontrados', analysisData);
+                            
+                            // Salvar dados da análise permanentemente
+                            const mealAnalysisKey = `meal-analysis-${meal.id}-${new Date().toISOString().split('T')[0]}`;
+                            localStorage.setItem(mealAnalysisKey, JSON.stringify({
+                              ...analysisData,
+                              mealId: meal.id,
+                              mealType: meal.name,
+                              timestamp: new Date().toISOString()
+                            }));
+                            
+                            // Salvar também no histórico de análises
+                            const existingHistory = localStorage.getItem('meal-analysis-history') || '[]';
+                            try {
+                              const historyArray = JSON.parse(existingHistory);
+                              historyArray.unshift({
+                                ...analysisData,
+                                mealId: meal.id,
+                                mealType: meal.name,
+                                timestamp: new Date().toISOString()
+                              });
+                              // Manter apenas as últimas 20 análises
+                              const updatedHistory = historyArray.slice(0, 20);
+                              localStorage.setItem('meal-analysis-history', JSON.stringify(updatedHistory));
+                            } catch (e) {
+                              console.error('Erro ao atualizar histórico de análises:', e);
+                            }
+                          } catch (error) {
+                            console.error('Erro ao processar dados da análise:', error);
+                          }
+                        } else {
+                          debugLog('Sem dados de análise disponíveis', null);
+                        }
+                        
+                        // Atualizar os dados analisados
+                        setAnalyzedMealData(data);
+                        
+                        // Criar uma descrição para o campo "Comeu algo diferente"
+                        let descriptionText = '';
+                        
+                        // Verificar se há uma análise salva no localStorage
+                        const savedAnalysis = localStorage.getItem('lastMealAnalysis');
+                        if (savedAnalysis) {
+                          try {
+                            const parsedAnalysis = JSON.parse(savedAnalysis);
+                            if (parsedAnalysis.description) {
+                              descriptionText = parsedAnalysis.description;
+                              console.log('Usando descrição da análise salva:', descriptionText);
+                            } else if (parsedAnalysis.suggestedFoods && parsedAnalysis.suggestedFoods.length > 0) {
+                              // Usar os alimentos sugeridos se estiverem disponíveis
+                              descriptionText = parsedAnalysis.suggestedFoods.join(', ');
+                              console.log('Usando alimentos sugeridos da análise salva:', descriptionText);
+                            }
+                            // Remover a análise do localStorage após usar
+                            localStorage.removeItem('lastMealAnalysis');
+                          } catch (e) {
+                            console.error('Erro ao analisar lastMealAnalysis:', e);
+                          }
+                        } else {
+                          // Extrair os alimentos detectados
+                          if (data.foodItems && data.foodItems.length > 0) {
+                            const foodItems = data.foodItems.map(item => item.name);
+                            descriptionText = foodItems.join(', ');
+                            console.log('Alimentos detectados:', foodItems);
+                          }
+                          // Usar a descrição da análise se disponível
+                          else if (data.analysisSummary) {
+                            descriptionText = data.analysisSummary;
+                          }
+                          // Se ainda não tiver descrição, usar o nome do alimento
+                          else if (data.foodName) {
+                            descriptionText = data.foodName;
+                          }
+                        }
+                        
+                        console.log('Definindo texto alternativo:', descriptionText);
+                        setAlternativeFoodText(descriptionText);
+                        
+                        // Adicionar calorias ao contador aqui mesmo
+                        try {
+                          if (data.calories && data.calories > 0) {
+                            // Adicionar as calorias usando o serviço
+                            const updatedCalorieData = addConsumedCalories(data.calories);
+                            console.log(`Adicionadas ${data.calories} calorias ao contador. Total: ${updatedCalorieData.consumedCalories}`);
+                            
+                            // Forçar a atualização da interface do contador
+                            forceUpdateCalorieCounter();
+                            
+                            toast.success('Calorias adicionadas', {
+                              description: `${data.calories} calorias foram adicionadas ao seu contador diário.`
+                            });
+                          }
+                        } catch (error) {
+                          console.error('Erro ao adicionar calorias após análise:', error);
+                        }
+                        
+                        // IMPORTANTE: Esconder o analisador e voltar para a tela principal
+                        setTimeout(() => {
+                          setShowAnalyzer(false);
+                        }, 500); // Pequeno delay para garantir que a interface seja atualizada corretamente
+                      };
+                      handleCompleteMeal();
+                        // Remover a análise do localStorage após usar
+                        localStorage.removeItem('lastMealAnalysis');
+                      } catch (e) {
+                        console.error('Erro ao analisar lastMealAnalysis:', e);
+                      }
+                  presetMealType={meal.name}
+                />
+              </div>
+            ) : (
+              <>
+                {/* Box superior com a descrição da comida */}
+                <div className="mb-4 p-3 rounded-md bg-gray-50 border border-gray-200">
+                  <p className="text-sm text-gray-700">
+                    {meal.description || `Opção equilibrada e nutritiva para ${meal.name.toLowerCase()}.`}
+                  </p>
+                </div>
+                
+                {/* Sugestões de alimentos baseadas no horário */}
+                {!analyzedMealData && suggestions.length > 0 && (
+                  <div className="mb-4">
+                    <h4 className="text-sm font-medium mb-2">Alimentos sugeridos:</h4>
+                    <ul className="list-disc pl-5 text-sm space-y-1">
+                      {suggestions.map((item, index) => (
+                        <li key={index}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Alimentos consumidos - mostrar da análise se disponível ou da refeição se completa */}
+                {(() => {
+                  // Verificar se há alimentos para exibir
+                  const hasAnalyzedFoods = analyzedMealData?.foodItems && analyzedMealData.foodItems.length > 0;
+                  const hasMealFoods = meal.status === 'completed' && meal.foods && meal.foods.length > 0;
+                  
+                  if (!hasAnalyzedFoods && !hasMealFoods) {
+                    return null;
+                  }
+                  
+                  return (
+                    <div className="mb-4">
+                      <h4 className="text-sm font-medium mb-2">Alimentos consumidos:</h4>
+                      <ul className="list-disc pl-5 text-sm space-y-1">
+                        {hasAnalyzedFoods && analyzedMealData?.foodItems ? 
+                          // Mostrar alimentos detectados na análise
+                          analyzedMealData.foodItems.map((item, index) => (
+                            <li key={`analyzed-${index}`}>{item.name}</li>
+                          )) :
+                          // Ou mostrar alimentos da refeição completa
+                          hasMealFoods && meal.foods ? 
+                            meal.foods.map((food, index) => (
+                              <li key={`meal-${index}`}>{food}</li>
+                            )) : 
+                            <li>Nenhum alimento detectado</li>
+                        }
+                      </ul>
+                    </div>
+                  );
+                })()}
+
+                {/* Boxes coloridos com informações nutricionais */}
+                <div className="grid grid-cols-4 gap-2 mb-4">
+                  <div className="p-3 bg-gray-50 rounded-md text-center">
+                    <div className="text-lg font-semibold">
+                      {analyzedMealData ? (
+                        <span className="flex flex-col items-center">
+                          <span className="text-lg">{analyzedMealData.calories || 0}</span>
+                          {meal.calories && meal.calories !== analyzedMealData.calories && (
+                            <span className="text-xs text-gray-400 line-through">{meal.calories}</span>
+                          )}
+                        </span>
+                      ) : (
+                        meal.calories || 450
+                      )}
+                    </div>
+                    <div className="text-xs text-gray-500">kcal</div>
+                  </div>
+                  <div className="p-3 bg-green-50 rounded-md text-center">
+                    <div className="text-lg font-semibold text-green-600">{analyzedMealData?.protein || meal.protein || 35}g</div>
+                    <div className="text-xs text-green-600">Proteínas</div>
+                  </div>
+                  <div className="p-3 bg-amber-50 rounded-md text-center">
+                    <div className="text-lg font-semibold text-amber-600">{analyzedMealData?.carbs || meal.carbs || 45}g</div>
+                    <div className="text-xs text-amber-600">Carboidratos</div>
+                  </div>
+                  <div className="p-3 bg-blue-50 rounded-md text-center">
+                    <div className="text-lg font-semibold text-blue-600">{analyzedMealData?.fat || meal.fat || 15}g</div>
+                    <div className="text-xs text-blue-600">Gorduras</div>
+                  </div>
+                </div>
+                
+                {/* Informações da análise atual */}
+                {analyzedMealData && hasJustAnalyzed && (
+                  <div className="p-3 mb-4 bg-blue-50 border border-blue-100 rounded-md">
+                    <h4 className="text-sm font-medium text-blue-800 mb-1">Resultado da análise</h4>
+                    <div className="text-xs text-blue-700">
+                      <p>Esta refeição contém aproximadamente <strong>{analyzedMealData.calories} calorias</strong>.</p>
+                      {analyzedMealData.foodItems && analyzedMealData.foodItems.length > 0 && (
+                        <ul className="mt-1 pl-4 list-disc text-xs">
+                          {analyzedMealData.foodItems.map((item, idx) => (
+                            <li key={idx}>{item.name} {item.calories ? `(~${item.calories} kcal)` : ''}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                <div className="my-6 space-y-6">
+                  {meal.foods && meal.foods.length > 0 && (
+                    <div>
+                      <h3 className="text-base font-semibold mb-2">Alimentos sugeridos:</h3>
+                      <ul className="space-y-1">
+                        {meal.foods.map((food, index) => (
+                          <li key={index} className="flex items-center space-x-2">
+                            <div className="h-2 w-2 rounded-full bg-primary" />
+                            <span>{food}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  
+                  <div>
+                    <h3 className="text-base font-semibold mb-2">Comeu algo diferente?</h3>
+                    {/* Mostrar mensagem apenas quando houver análise recente */}
+                    {analyzedMealData && hasJustAnalyzed && (
+                      <div className="p-2 bg-green-50 text-green-800 text-sm rounded-md mb-2">
+                        Foi registrar os alimentos. Estes alimentos serão usados quando você confirmar a refeição.
+                      </div>
+                    )}
+                    <textarea 
+                      value={alternativeFoodText}
+                      onChange={(e) => setAlternativeFoodText(e.target.value)}
+                      placeholder="Descreva o que você comeu..."
+                      className="h-24 resize-none"
+                    />
+                  </div>
+                  
+                  {/* O analisador de calorias foi removido daqui, agora é acessado apenas pelo botão abaixo */}
+                </div>
+
+                <div className="mb-4">
+                  <Button 
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3"
+                    onClick={() => setShowAnalyzer(true)}
+                  >
+                    Analisar Outra Refeição
+                  </Button>
+                </div>
+              </>
+            )}
+
+
+            {/* Lista de alimentos já removida - estava duplicada */}
+          </div>
+        </ScrollArea>
+
+        <DialogFooter className="mt-4">
+          {meal.status === 'upcoming' ? (
+            <Button 
+              onClick={handleCompleteMeal} 
+              className="bg-green-600 hover:bg-green-700"
+              disabled={isSubmitting}
+            >
+              <Check className="h-4 w-4 mr-2" />
+              Confirmar Refeição
+            </Button>
+          ) : (
+            <Button 
+              variant="outline" 
+              onClick={handleUndoComplete}
+              disabled={isUndoing}
+              className="text-amber-600 border-amber-300 hover:bg-amber-50"
+            >
+              Desfazer
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+export default MealDetailsModal;

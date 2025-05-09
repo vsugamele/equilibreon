@@ -1,0 +1,333 @@
+import React, { useState, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter
+} from "@/components/ui/dialog";
+import { Badge } from '@/components/ui/badge';
+import { Textarea } from '@/components/ui/textarea';
+import { Clock, Check, X, Utensils, Image as ImageIcon } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { addConsumedCalories } from '@/services/calorieTrackingService';
+import NutritionAnalyzer from './NutritionAnalyzer';
+import { toast } from '@/components/ui/use-toast';
+import { forceUpdateCalorieCounter } from '@/services/calorieTrackingService';
+
+// Tipo para detalhes da refeição
+interface MealDetailsType {
+  id: number;
+  name: string;
+  time: string;
+  alternativeText?: string;
+  completed?: boolean;
+}
+
+// Tipo para os dados de nutrição analisados
+interface NutritionData {
+  calories?: number;
+  protein?: number;
+  carbs?: number;
+  fat?: number;
+  analysisSummary?: string;
+  foodName?: string;
+  foodItems?: { name: string, confidence: number }[];
+}
+
+interface MealDetailsModalProps {
+  meal: MealDetailsType;
+  onMealCompleted: (mealId: number) => void;
+  onUndoMealCompleted?: (mealId: number) => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  className?: string;
+}
+
+const MealDetailsModal: React.FC<MealDetailsModalProps> = ({ 
+  meal, 
+  onMealCompleted, 
+  onUndoMealCompleted, 
+  open, 
+  onOpenChange, 
+  className = "" 
+}) => {
+  const [alternativeDescription, setAlternativeDescription] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [analyzedMealData, setAnalyzedMealData] = useState<NutritionData | null>(null);
+  const [alternativeFoodText, setAlternativeFoodText] = useState('');
+  const [showAnalyzer, setShowAnalyzer] = useState(false);
+  const [isPhotoMode, setIsPhotoMode] = useState(false);
+  
+  // Função para completar a refeição
+  const handleCompleteMeal = () => {
+    if (isSubmitting) return;
+    
+    setIsSubmitting(true);
+    
+    // Se tiver descrição alternativa, salvar
+    if (alternativeDescription.trim()) {
+      const savedMeals = localStorage.getItem('nutri-mindflow-meals');
+      if (savedMeals) {
+        const meals = JSON.parse(savedMeals);
+        const updatedMeals = meals.map((m: MealDetailsType) => {
+          if (m.id === meal.id) {
+            return {
+              ...m,
+              alternativeText: alternativeDescription.trim(),
+              completed: true
+            };
+          }
+          return m;
+        });
+        
+        localStorage.setItem('nutri-mindflow-meals', JSON.stringify(updatedMeals));
+      }
+    }
+    
+    // Chamar função de callback para completar a refeição
+    onMealCompleted(meal.id);
+    
+    // Limpar estados
+    setIsSubmitting(false);
+    setAlternativeDescription('');
+    
+    // Fechar o modal
+    onOpenChange(false);
+  };
+  
+  // Função para desfazer a conclusão da refeição
+  const handleUndoMealCompleted = () => {
+    if (onUndoMealCompleted) {
+      onUndoMealCompleted(meal.id);
+      onOpenChange(false);
+    }
+  };
+  
+  // Tratar a análise completa de nutrição
+  const handleAnalysisComplete = (data: NutritionData) => {
+    if (data) {
+      try {
+        // Salvar a análise no localStorage
+        localStorage.setItem('lastMealAnalysis', JSON.stringify(data));
+
+        // Definir os dados analisados no state
+        setAnalyzedMealData(data);
+        
+        let descriptionText = '';
+        
+        if (data.foodItems && data.foodItems.length > 0) {
+          // Extrair os alimentos detectados
+          const foodItems = data.foodItems.map(item => item.name);
+          descriptionText = foodItems.join(', ');
+          console.log('Alimentos detectados:', foodItems);
+        }
+        // Usar a descrição da análise se disponível
+        else if (data.analysisSummary) {
+          descriptionText = data.analysisSummary;
+        }
+        // Se ainda não tiver descrição, usar o nome do alimento
+        else if (data.foodName) {
+          descriptionText = data.foodName;
+        }
+        
+        setAlternativeFoodText(descriptionText);
+        
+        // Adicionar calorias ao contador
+        if (data.calories && data.calories > 0) {
+          try {
+            // Adicionar as calorias usando o serviço
+            const updatedCalorieData = addConsumedCalories(data.calories);
+            console.log(`Adicionadas ${data.calories} calorias ao contador. Total: ${updatedCalorieData.consumedCalories}`);
+            
+            // Forçar a atualização da interface do contador
+            forceUpdateCalorieCounter();
+            
+            toast.success('Calorias adicionadas', {
+              description: `${data.calories} calorias foram adicionadas ao seu contador diário.`
+            });
+          } catch (error) {
+            console.error('Erro ao adicionar calorias após análise:', error);
+          }
+        }
+      } catch (error) {
+        console.error('Erro ao processar dados de análise:', error);
+      }
+    }
+  };
+  
+  // Carregar dados salvos quando o modal for aberto
+  useEffect(() => {
+    if (open) {
+      // Verificar se existe uma descrição alternativa salva
+      const savedMeals = localStorage.getItem('nutri-mindflow-meals');
+      if (savedMeals) {
+        const meals = JSON.parse(savedMeals);
+        const currentMeal = meals.find((m: MealDetailsType) => m.id === meal.id);
+        if (currentMeal && currentMeal.alternativeText) {
+          setAlternativeDescription(currentMeal.alternativeText);
+        }
+      }
+      
+      // Se houver análise de refeição salva no localStorage, carregar
+      const lastAnalysis = localStorage.getItem('lastMealAnalysis');
+      if (lastAnalysis) {
+        try {
+          const parsedAnalysis = JSON.parse(lastAnalysis);
+          setAnalyzedMealData(parsedAnalysis);
+          
+          // Extrair texto descritivo da análise
+          let descriptionText = '';
+          if (parsedAnalysis.foodItems && parsedAnalysis.foodItems.length > 0) {
+            const foodItems = parsedAnalysis.foodItems.map((item: any) => item.name);
+            descriptionText = foodItems.join(', ');
+          } else if (parsedAnalysis.analysisSummary) {
+            descriptionText = parsedAnalysis.analysisSummary;
+          } else if (parsedAnalysis.foodName) {
+            descriptionText = parsedAnalysis.foodName;
+          }
+          
+          if (descriptionText) {
+            setAlternativeFoodText(descriptionText);
+          }
+        } catch (e) {
+          console.error('Erro ao analisar lastMealAnalysis:', e);
+        }
+      }
+    }
+  }, [open, meal.id, meal.name]);
+  
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className={`max-w-md ${className}`}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center">
+            <div className="flex-1">{meal.name}</div>
+            <Badge className="ml-2 bg-blue-100 text-blue-800 hover:bg-blue-200">
+              <Clock className="h-3 w-3 mr-1" /> {meal.time}
+            </Badge>
+          </DialogTitle>
+          <DialogDescription>
+            Registre detalhes sobre esta refeição
+          </DialogDescription>
+        </DialogHeader>
+        
+        {!showAnalyzer ? (
+          <>
+            <div className="py-4">
+              <div className="mb-4 flex gap-2">
+                <Button 
+                  variant="outline" 
+                  className={cn(
+                    "flex-1",
+                    !isPhotoMode ? "bg-blue-50 border-blue-200" : ""
+                  )}
+                  onClick={() => setIsPhotoMode(false)}
+                >
+                  <Utensils className="h-4 w-4 mr-2" />
+                  Texto
+                </Button>
+                <Button 
+                  variant="outline"
+                  className={cn(
+                    "flex-1",
+                    isPhotoMode ? "bg-blue-50 border-blue-200" : ""
+                  )}
+                  onClick={() => {
+                    setIsPhotoMode(true);
+                    setShowAnalyzer(true);
+                  }}
+                >
+                  <ImageIcon className="h-4 w-4 mr-2" />
+                  Foto
+                </Button>
+              </div>
+              
+              {!isPhotoMode && (
+                <div>
+                  <div className="mb-2 text-sm font-medium">O que você comeu?</div>
+                  <Textarea
+                    placeholder="Descreva o que você comeu nesta refeição..."
+                    className="resize-none h-24"
+                    value={alternativeDescription || alternativeFoodText}
+                    onChange={(e) => setAlternativeDescription(e.target.value)}
+                  />
+                  
+                  {analyzedMealData && analyzedMealData.calories && (
+                    <div className="mt-3 p-3 bg-green-50 rounded-md border border-green-100">
+                      <div className="font-medium mb-1 text-green-700">Análise Nutricional:</div>
+                      <div className="grid grid-cols-3 gap-2 text-sm">
+                        <div className="bg-white p-2 rounded border">
+                          <div className="text-xs text-gray-500">Calorias</div>
+                          <div className="font-medium">{analyzedMealData.calories} kcal</div>
+                        </div>
+                        {analyzedMealData.protein && (
+                          <div className="bg-white p-2 rounded border">
+                            <div className="text-xs text-gray-500">Proteínas</div>
+                            <div className="font-medium">{analyzedMealData.protein}g</div>
+                          </div>
+                        )}
+                        {analyzedMealData.carbs && (
+                          <div className="bg-white p-2 rounded border">
+                            <div className="text-xs text-gray-500">Carboidratos</div>
+                            <div className="font-medium">{analyzedMealData.carbs}g</div>
+                          </div>
+                        )}
+                        {analyzedMealData.fat && (
+                          <div className="bg-white p-2 rounded border">
+                            <div className="text-xs text-gray-500">Gorduras</div>
+                            <div className="font-medium">{analyzedMealData.fat}g</div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            
+            <DialogFooter className="gap-2 sm:gap-0">
+              {meal.completed && onUndoMealCompleted && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleUndoMealCompleted}
+                  className="w-full sm:w-auto"
+                >
+                  <X className="h-4 w-4 mr-2" />
+                  Desfazer Conclusão
+                </Button>
+              )}
+              
+              {!meal.completed && (
+                <Button
+                  type="button"
+                  onClick={handleCompleteMeal}
+                  className="w-full sm:w-auto"
+                >
+                  <Check className="h-4 w-4 mr-2" />
+                  Confirmar Refeição
+                </Button>
+              )}
+            </DialogFooter>
+          </>
+        ) : (
+          <div className="pt-2 pb-4">
+            <NutritionAnalyzer 
+              onAnalysisComplete={handleAnalysisComplete}
+              onCancel={() => {
+                setShowAnalyzer(false);
+                setIsPhotoMode(false);
+              }}
+              presetMealType={meal.name}
+            />
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+export default MealDetailsModal;

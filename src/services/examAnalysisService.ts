@@ -75,9 +75,12 @@ export const analyzeExamWithAI = async (
     // Usar a chave da OpenAI da configuração explícita
     const apiKey = openaiConfig.apiKey;
     
-    console.log('ExamAnalysis: OpenAI API Key configurada:', !!apiKey);
-    
-    console.log('Usando chave da API OpenAI codificada no serviço');
+    if (apiKey) {
+      console.log('ExamAnalysis: OpenAI API Key configurada:', apiKey.substring(0, 15) + '...');
+    } else {
+      console.error('ExamAnalysis: OpenAI API Key não configurada');
+      throw new Error('OpenAI API key não configurada');
+    }
     
     // Inicializar cliente OpenAI com a chave codificada
     const openai = new OpenAI({
@@ -295,7 +298,7 @@ export const analyzeExamWithAI = async (
     
     // Fazer chamada para a API da OpenAI
     const response = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-4o", // Verificando se estamos usando o modelo correto
       messages: [
         { role: "system", content: "Você é um especialista em interpretação de exames médicos com foco em nutrição e saúde geral." },
         { role: "user", content: prompt }

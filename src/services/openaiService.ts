@@ -44,7 +44,11 @@ export interface OpenAIAnalysisResponse {
 import { openaiConfig } from '../integrations/supabase/config';
 const OPENAI_API_KEY = openaiConfig.apiKey;
 
-console.log('OpenAI API Key configurada:', !!OPENAI_API_KEY);
+if (OPENAI_API_KEY) {
+  console.log('OpenAI API Key configurada:', OPENAI_API_KEY.substring(0, 15) + '...');
+} else {
+  console.error('OpenAI API Key não configurada');
+}
 
 /**
  * Analisa uma imagem de alimento usando a API da OpenAI diretamente
@@ -127,6 +131,13 @@ export async function analyzeImageWithOpenAI(imageFile: File, analysisType: 'FOO
     const finalSystemPrompt = enrichedPrompt + promptSuffix;
     
     console.log('Chamando API da OpenAI...');
+    
+    // Validar a chave API antes de enviar a requisição
+    if (!OPENAI_API_KEY || OPENAI_API_KEY.trim() === '') {
+      throw new Error('Chave da API OpenAI não configurada. Verifique as variáveis de ambiente.');
+    }
+    
+    console.log('Enviando requisição para OpenAI com a chave:', OPENAI_API_KEY.substring(0, 15) + '...');
     
     // Chamar a API da OpenAI diretamente
     const response = await fetch('https://api.openai.com/v1/chat/completions', {

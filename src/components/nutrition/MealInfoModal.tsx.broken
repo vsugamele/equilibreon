@@ -1,0 +1,846 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { Dialog, DialogContent, DialogClose, DialogTrigger } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Textarea } from '@/components/ui/textarea';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Clock, Check, X, Camera, Loader2, Brain, Calculator, RefreshCw } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
+import foodAnalysisService, { FoodAnalysisResult, FoodItem } from '@/services/foodAnalysisService';
+import { Input } from '@/components/ui/input';
+
+// Definição de interfaces
+interface MealInfoModalProps {
+  trigger?: React.ReactNode;
+  className?: string;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  meal?: any;
+  onMealUpdated?: (updatedMeal: any) => void;
+  onMealCompleted?: (meal: any) => void;
+  onUndoMealCompleted?: (meal: any) => void;
+}
+
+interface MealDetails {
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  fiber?: number;
+  items?: string[];
+  photoUrl?: string;
+  description?: string;
+  healthScore?: number;
+}
+
+// Componente MealInfoModal
+const MealInfoModal: React.FC<MealInfoModalProps> = ({
+  trigger,
+  className,
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
+  meal,
+  onMealUpdated,
+  onMealCompleted,
+  onUndoMealCompleted
+}) => {
+  // Estados para controle do modal
+  const [internalOpen, setInternalOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<string>("details");
+  
+  // Função para lidar com a mudança de abas
+  const handleTabChange = (tab: string) => {
+    setActiveTab(tab);
+    
+    // Se mudar para a aba de análise de IA e não tiver análise ainda, iniciar análise automática
+    if (tab === 'nutrition' && !nutritionAnalysis) {
+      if (alternativeDescription.trim() || photoFile) {
+        handleAnalyzeWithAI();
+      }
+    }
+  };
+  const [alternativeDescription, setAlternativeDescription] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [photoUrl, setPhotoUrl] = useState<string>('');
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [nutritionAnalysis, setNutritionAnalysis] = useState<FoodAnalysisResult | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Determina se o componente é controlado externamente
+  const isControlled = controlledOpen !== undefined;
+  const open = isControlled ? controlledOpen : internalOpen;
+  const onOpenChange = isControlled ? controlledOnOpenChange : setInternalOpen;
+
+  // Efeito para inicializar dados quando o modal é aberto
+  useEffect(() => {
+    if (open && meal) {
+      setAlternativeDescription(meal.description || '');
+      setPhotoUrl(meal.details?.photoUrl || '');
+      setPhotoFile(null);
+      setNutritionAnalysis(null);
+      setActiveTab('details');
+    }
+  }, [open, meal]);
+
+  // Função para lidar com upload de foto
+  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const file = e.target.files[0];
+      setPhotoFile(file);
+      const localUrl = URL.createObjectURL(file);
+      setPhotoUrl(localUrl);
+      
+      // Feedback visual
+      toast.success('Foto carregada com sucesso!');
+      
+      // Analisar automaticamente quando uma foto é carregada
+      // e mudar para a aba de análise
+      setIsAnalyzing(true);
+      foodAnalysisService.analyzeFood("", file)
+        .then(result => {
+          setNutritionAnalysis(result);
+          setActiveTab('nutrition');
+        })
+        .catch(error => {
+          console.error('Erro ao analisar a imagem:', error);
+          toast.error('Não foi possível analisar a imagem. Tente novamente ou descreva a refeição.');
+        })
+        .finally(() => {
+          setIsAnalyzing(false);
+        });
+    }
+  };
+
+  // Função para limpar a imagem
+  const handleClearImage = () => {
+    setPhotoUrl('');
+    setPhotoFile(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  // Função para registrar a refeição como consumida
+  const handleManualComplete = async () => {
+    if (isSubmitting || !alternativeDescription.trim()) return;
+    
+    setIsSubmitting(true);
+    
+    try {
+      // Verifica se há uma descrição alternativa para salvar
+      const mealDetails: MealDetails = {
+        calories: meal?.details?.calories || 0,
+        protein: meal?.details?.protein || 0,
+        carbs: meal?.details?.carbs || 0,
+        fat: meal?.details?.fat || 0,
+        fiber: meal?.details?.fiber || 0,
+        items: meal?.details?.items || [],
+        photoUrl: photoUrl || meal?.details?.photoUrl || '',
+        description: alternativeDescription || meal?.description,
+      };
+
+      // Atualiza o objeto da refeição
+      const updatedMeal = {
+        ...meal,
+        completed: true,
+        completed_at: new Date().toISOString(),
+        description: alternativeDescription || meal?.description,
+        details: mealDetails
+      };
+
+      // Notifica sobre a conclusão da refeição
+      if (onMealCompleted) {
+        onMealCompleted(updatedMeal);
+      }
+
+      if (onOpenChange) {
+        onOpenChange(false);
+      }
+
+      toast.success('Refeição registrada com sucesso!');
+      setIsSubmitting(false);
+      setAlternativeDescription('');
+    } catch (error) {
+      console.error('Erro ao completar refeição:', error);
+      toast.error('Erro ao registrar refeição');
+      setIsSubmitting(false);
+    }
+  };
+
+  // Função para analisar a refeição com IA
+  const handleAnalyzeWithAI = async () => {
+    if (isAnalyzing || !alternativeDescription.trim()) return;
+    
+    setIsAnalyzing(true);
+    toast.loading('Analisando refeição com IA...', { id: 'ai-analysis' });
+    
+    try {
+      // Chama o serviço de análise de alimentos
+      const result = await foodAnalysisService.analyzeFood(alternativeDescription, photoFile);
+      
+      setNutritionAnalysis(result);
+      
+      // Prepara os detalhes atualizados da refeição
+      const mealDetails: MealDetails = {
+        calories: result.calories,
+        protein: result.protein,
+        carbs: result.carbs,
+        fat: result.fat,
+        fiber: result.fiber,
+        items: result.foodItems.map(item => item.name),
+        photoUrl: photoUrl || meal?.details?.photoUrl || '',
+        description: alternativeDescription,
+        healthScore: result.healthScore
+      };
+
+      // Atualiza o objeto da refeição
+      const updatedMeal = {
+        ...meal,
+        description: alternativeDescription,
+        details: mealDetails
+      };
+
+      // Notifica sobre a atualização da refeição
+      if (onMealUpdated) {
+        onMealUpdated(updatedMeal);
+      }
+
+      toast.success('Análise concluída com sucesso!', { id: 'ai-analysis' });
+      setActiveTab('nutrition'); // Muda para a aba de nutrição após análise
+    } catch (error) {
+      console.error('Erro ao analisar refeição:', error);
+      toast.error('Falha ao analisar refeição. Tente novamente.', { id: 'ai-analysis' });
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  // Função para lidar com o desfazer da conclusão da refeição
+  const handleUndoComplete = () => {
+    if (meal && onUndoMealCompleted) {
+      onUndoMealCompleted(meal);
+      toast.info('Marcação de refeição desfeita');
+
+      if (onOpenChange) {
+        onOpenChange(false);
+      }
+    }
+  };
+  
+  // Renderiza o conteúdo do modal
+  return (
+    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
+      {trigger && (
+        <DialogPrimitive.Trigger asChild>
+          {trigger}
+        </DialogPrimitive.Trigger>
+      )}
+      
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" />
+        <DialogPrimitive.Content className={cn(
+          "fixed left-[50%] top-[50%] z-50 w-full max-w-lg translate-x-[-50%] translate-y-[-50%] rounded-md bg-white p-4 shadow-lg dark:bg-slate-900 sm:p-6",
+          className
+        )}>
+          {/* Cabeçalho do modal */}
+          <div className="flex items-center justify-between mb-4">
+            <DialogPrimitive.Title className="text-xl font-semibold">
+              {meal?.completed ? 'Detalhes da Refeição' : 'Registrar Refeição'}
+            </DialogPrimitive.Title>
+            <div className="flex items-center space-x-2">
+              {meal?.completed && (
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={handleUndoComplete}
+                  title="Desfazer marcação de refeição concluída"
+                >
+                  <RefreshCw className="h-4 w-4 mr-1" />
+                  Desfazer
+                </Button>
+              )}
+              <DialogPrimitive.Close asChild>
+                <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                  <X className="h-4 w-4" />
+                </Button>
+              </DialogPrimitive.Close>
+            </div>
+          </div>
+
+          {/* Horário da refeição */}
+          <div className="mb-4">
+            <Badge variant="outline" className="px-2 py-1 text-sm">
+              <Clock className="h-3 w-3 mr-1 inline" />
+              {meal?.time_formatted || 'Horário não definido'}
+            </Badge>
+            {meal?.completed && (
+              <Badge className="ml-2 bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-100">
+                <Check className="h-3 w-3 mr-1 inline" />
+                Concluída
+              </Badge>
+            )}
+          </div>
+
+          {/* Tabs de conteúdo */}
+          <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
+            <TabsList className="grid w-full grid-cols-3 mb-4">
+              <TabsTrigger value="details">Detalhes</TabsTrigger>
+              <TabsTrigger value="suggestions">Sugestões</TabsTrigger>
+              <TabsTrigger value="nutrition">Análise com IA</TabsTrigger>
+            </TabsList>
+
+            {/* Tab de detalhes */}
+            <TabsContent value="details" className="space-y-4">
+              {/* Foto da refeição */}
+              <div className="mb-4">
+                {photoUrl ? (
+                  <div className="relative rounded-md overflow-hidden">
+                    <img src={photoUrl} alt="Foto da refeição" className="w-full h-48 object-cover" />
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="absolute top-2 right-2"
+                      onClick={handleClearImage}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center h-48 border-2 border-dashed rounded-md border-gray-300 dark:border-gray-700 p-4">
+                    <div className="flex flex-col items-center justify-center py-4">
+                      <Camera className="h-12 w-12 text-gray-400 mb-2" />
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
+                        Adicione uma foto da sua refeição
+                      </p>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        Escolher imagem
+                      </Button>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        ref={fileInputRef}
+                        className="hidden"
+                        onChange={handlePhotoUpload}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Descrição da refeição */}
+              <div className="space-y-2">
+                <label className="font-medium text-sm">
+                  O que você comeu?
+                </label>
+                <Textarea 
+                  placeholder="Descreva sua refeição... Ex: 1 prato de arroz com frango grelhado e salada"
+                  value={alternativeDescription}
+                  onChange={(e) => setAlternativeDescription(e.target.value)}
+                  className="min-h-[100px]"
+                />
+              </div>
+
+              {/* Botões de ação */}
+              <div className="grid grid-cols-2 gap-2 mt-4">
+                <Button 
+                  variant="outline" 
+                  onClick={handleAnalyzeWithAI}
+                  disabled={isAnalyzing || !alternativeDescription.trim()}
+                  className="flex items-center"
+                >
+                  {isAnalyzing ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                  <div className="flex items-center justify-center h-48 border-2 border-dashed rounded-md border-gray-300 dark:border-gray-700 p-4">
+                    <div className="flex flex-col items-center justify-center py-4">
+                      <Camera className="h-12 w-12 text-gray-400 mb-2" />
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
+                        Adicione uma foto da sua refeição
+                      </p>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        Escolher imagem
+                      </Button>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        ref={fileInputRef}
+                        className="hidden"
+                        onChange={handlePhotoUpload}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                    <Brain className="h-4 w-4 mr-2" />
+                  ) : (
+                  <div className="flex items-center justify-center h-48 border-2 border-dashed rounded-md border-gray-300 dark:border-gray-700 p-4">
+                    <div className="flex flex-col items-center justify-center py-4">
+                      <Camera className="h-12 w-12 text-gray-400 mb-2" />
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
+                        Adicione uma foto da sua refeição
+                      </p>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        Escolher imagem
+                      </Button>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        ref={fileInputRef}
+                        className="hidden"
+                        onChange={handlePhotoUpload}
+                      />
+                    </div>
+                  </div>
+                )}
+                  Analisar com IA
+                </Button>
+                <Button 
+                  onClick={handleManualComplete}
+                  disabled={isSubmitting || !alternativeDescription.trim()}
+                >
+                  {isSubmitting ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                  <div className="flex items-center justify-center h-48 border-2 border-dashed rounded-md border-gray-300 dark:border-gray-700 p-4">
+                    <div className="flex flex-col items-center justify-center py-4">
+                      <Camera className="h-12 w-12 text-gray-400 mb-2" />
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
+                        Adicione uma foto da sua refeição
+                      </p>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        Escolher imagem
+                      </Button>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        ref={fileInputRef}
+                        className="hidden"
+                        onChange={handlePhotoUpload}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                    <Check className="h-4 w-4 mr-2" />
+                  ) : (
+                  <div className="flex items-center justify-center h-48 border-2 border-dashed rounded-md border-gray-300 dark:border-gray-700 p-4">
+                    <div className="flex flex-col items-center justify-center py-4">
+                      <Camera className="h-12 w-12 text-gray-400 mb-2" />
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
+                        Adicione uma foto da sua refeição
+                      </p>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        Escolher imagem
+                      </Button>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        ref={fileInputRef}
+                        className="hidden"
+                        onChange={handlePhotoUpload}
+                      />
+                    </div>
+                  </div>
+                )}
+                  Registrar
+                </Button>
+              </div>
+            </TabsContent>
+
+            {/* Tab de sugestões */}
+            <TabsContent value="suggestions" className="space-y-4">
+              <div className="space-y-4">
+                <h3 className="text-lg font-medium">Informações da Refeição</h3>
+                
+                <h4 className="text-md font-medium mt-4">Informações Nutricionais</h4>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-md">
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Calorias</p>
+                    <p className="text-xl font-bold">{meal?.details?.calories || 350} kcal</p>
+                  </div>
+                  <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-md">
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Proteínas</p>
+                    <p className="text-xl font-bold">{meal?.details?.protein || 15}g</p>
+                  </div>
+                  <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-md">
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Carboidratos</p>
+                    <p className="text-xl font-bold">{meal?.details?.carbs || 30}g</p>
+                  </div>
+                  <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-md">
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Gorduras</p>
+                    <p className="text-xl font-bold">{meal?.details?.fat || 12}g</p>
+                  </div>
+                </div>
+                
+                <h4 className="text-md font-medium mt-4">Alimentos Sugeridos</h4>
+                <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-md">
+                  <p className="text-green-700 dark:text-green-400 mb-2">Opções recomendadas para {meal?.time_formatted || 'esta refeição'}:</p>
+                  <ul className="space-y-1">
+                    <li className="flex items-start">
+                      <span className="mr-2 text-green-600">•</span>
+                      <span>1 iogurte grego sem açúcar</span>
+                    </li>
+                    <li className="flex items-start">
+                      <span className="mr-2 text-green-600">•</span>
+                      <span>1 punhado de castanhas (30g)</span>
+                    </li>
+                    <li className="flex items-start">
+                      <span className="mr-2 text-green-600">•</span>
+                      <span>1 fruta média</span>
+                    </li>
+                    <li className="flex items-start">
+                      <span className="mr-2 text-green-600">•</span>
+                      <span>Chá de ervas sem açúcar</span>
+                    </li>
+                  </ul>
+                </div>
+                
+                <p className="mt-2 text-gray-600 dark:text-gray-400">Você consumiu estes alimentos?</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button 
+                    variant="outline" 
+                    className="flex items-center"
+                    onClick={() => {
+                      // Registra a refeição como consumida conforme sugerida
+                      if (meal) {
+                        const updatedMeal = {
+                          ...meal,
+                          completed: true,
+                          completed_at: new Date().toISOString(),
+                          followed_suggestion: true
+                        };
+                        
+                        if (onMealCompleted) {
+                          onMealCompleted(updatedMeal);
+                          toast.success('Refeição registrada conforme sugestões!');
+                          
+                          if (onOpenChange) {
+                            onOpenChange(false);
+                          }
+                        }
+                      }
+                    }}
+                  >
+                    <Check className="h-4 w-4 mr-2" />
+                    Sim, segui sugestões
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    className="flex items-center"
+                    onClick={() => setActiveTab('details')}
+                  >
+                    Comi algo diferente
+                  </Button>
+                </div>
+              </div>
+            </TabsContent>
+            
+            {/* Tab de análise com IA */}
+            <TabsContent value="nutrition" className="space-y-4">
+              {nutritionAnalysis ? (
+                <div className="space-y-4">
+                  <h3 className="text-xl font-semibold">Análise com IA</h3>
+                  {/* Macronutrientes */}
+                  <div className="grid grid-cols-4 gap-2">
+                    <div className="bg-blue-50 dark:bg-blue-900/30 p-3 rounded-md text-center">
+                      <p className="text-sm font-medium">Calorias</p>
+                      <p className="text-xl font-bold">{nutritionAnalysis.calories}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">kcal</p>
+                    </div>
+                    <div className="bg-red-50 dark:bg-red-900/30 p-3 rounded-md text-center">
+                      <p className="text-sm font-medium">Proteínas</p>
+                      <p className="text-xl font-bold">{nutritionAnalysis.protein}g</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">{Math.round(nutritionAnalysis.protein * 4)}kcal</p>
+                    </div>
+                    <div className="bg-yellow-50 dark:bg-yellow-900/30 p-3 rounded-md text-center">
+                      <p className="text-sm font-medium">Carbos</p>
+                      <p className="text-xl font-bold">{nutritionAnalysis.carbs}g</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">{Math.round(nutritionAnalysis.carbs * 4)}kcal</p>
+                    </div>
+                    <div className="bg-green-50 dark:bg-green-900/30 p-3 rounded-md text-center">
+                      <p className="text-sm font-medium">Gorduras</p>
+                      <p className="text-xl font-bold">{nutritionAnalysis.fat}g</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">{Math.round(nutritionAnalysis.fat * 9)}kcal</p>
+                    </div>
+                  </div>
+
+                  {/* Nível de saúde */}
+                  {nutritionAnalysis.healthScore && (
+                    <div className="mt-4">
+                      <p className="text-sm font-medium mb-1">Nível de saúde</p>
+                      <div className="h-2 bg-gray-200 dark:bg-gray-800 rounded-full">
+                        <div 
+                          className={`h-2 rounded-full ${
+                            nutritionAnalysis.healthScore > 7 ? 'bg-green-500' :
+                            nutritionAnalysis.healthScore > 4 ? 'bg-yellow-500' : 'bg-red-500'
+                          }`}
+                          style={{ width: `${(nutritionAnalysis.healthScore / 10) * 100}%` }}
+                        />
+                      </div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                        Pontuação: {nutritionAnalysis.healthScore}/10
+                      </p>
+                    </div>
+                  ) : (
+                  <div className="flex items-center justify-center h-48 border-2 border-dashed rounded-md border-gray-300 dark:border-gray-700 p-4">
+                    <div className="flex flex-col items-center justify-center py-4">
+                      <Camera className="h-12 w-12 text-gray-400 mb-2" />
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
+                        Adicione uma foto da sua refeição
+                      </p>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        Escolher imagem
+                      </Button>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        ref={fileInputRef}
+                        className="hidden"
+                        onChange={handlePhotoUpload}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                  {/* Alimentos identificados */}
+                  {nutritionAnalysis.foodItems && nutritionAnalysis.foodItems.length > 0 && (
+                    <div className="mt-4">
+                      <p className="text-sm font-medium mb-2">Alimentos identificados</p>
+                      <ul className="space-y-1">
+                        {nutritionAnalysis.foodItems.map((item, index) => (
+                          <li key={index} className="text-sm flex justify-between items-center">
+                            <span>• {item.name}</span>
+                            <span className="text-gray-500">{item.calories} kcal</span>
+                          </li>
+                        ) : (
+                  <div className="flex items-center justify-center h-48 border-2 border-dashed rounded-md border-gray-300 dark:border-gray-700 p-4">
+                    <div className="flex flex-col items-center justify-center py-4">
+                      <Camera className="h-12 w-12 text-gray-400 mb-2" />
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
+                        Adicione uma foto da sua refeição
+                      </p>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        Escolher imagem
+                      </Button>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        ref={fileInputRef}
+                        className="hidden"
+                        onChange={handlePhotoUpload}
+                      />
+                    </div>
+                  </div>
+                ))}
+                      </ul>
+                    </div>
+                  ) : (
+                  <div className="flex items-center justify-center h-48 border-2 border-dashed rounded-md border-gray-300 dark:border-gray-700 p-4">
+                    <div className="flex flex-col items-center justify-center py-4">
+                      <Camera className="h-12 w-12 text-gray-400 mb-2" />
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
+                        Adicione uma foto da sua refeição
+                      </p>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        Escolher imagem
+                      </Button>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        ref={fileInputRef}
+                        className="hidden"
+                        onChange={handlePhotoUpload}
+                      />
+                    </div>
+                  </div>
+                )}
+                  
+                  {/* Recomendações */}
+                  {nutritionAnalysis.userRecommendations && nutritionAnalysis.userRecommendations.length > 0 && (
+                    <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/30 rounded-md">
+                      <p className="text-sm font-medium mb-2">Recomendações</p>
+                      <ul className="space-y-1">
+                        {nutritionAnalysis.userRecommendations.map((rec, index) => (
+                          <li key={index} className="text-sm">• {rec}</li>
+                        ) : (
+                  <div className="flex items-center justify-center h-48 border-2 border-dashed rounded-md border-gray-300 dark:border-gray-700 p-4">
+                    <div className="flex flex-col items-center justify-center py-4">
+                      <Camera className="h-12 w-12 text-gray-400 mb-2" />
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
+                        Adicione uma foto da sua refeição
+                      </p>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        Escolher imagem
+                      </Button>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        ref={fileInputRef}
+                        className="hidden"
+                        onChange={handlePhotoUpload}
+                      />
+                    </div>
+                  </div>
+                ))}
+                      </ul>
+                    </div>
+                  ) : (
+                  <div className="flex items-center justify-center h-48 border-2 border-dashed rounded-md border-gray-300 dark:border-gray-700 p-4">
+                    <div className="flex flex-col items-center justify-center py-4">
+                      <Camera className="h-12 w-12 text-gray-400 mb-2" />
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
+                        Adicione uma foto da sua refeição
+                      </p>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        Escolher imagem
+                      </Button>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        ref={fileInputRef}
+                        className="hidden"
+                        onChange={handlePhotoUpload}
+                      />
+                    </div>
+                  </div>
+                )}
+                </div>
+              ) : (
+                <div className="text-center py-8">
+                  <Calculator className="h-12 w-12 mx-auto mb-2 text-gray-400" />
+                  <p className="text-gray-500">
+                    Descreva sua refeição e use a análise com IA para ver informações nutricionais
+                  </p>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="mt-2"
+                    onClick={() => setActiveTab('details')}
+                  >
+                    Voltar para detalhes
+                  </Button>
+                </div>
+              )}
+
+              {/* Botão para concluir após análise */}
+              {nutritionAnalysis && !meal?.completed && (
+                <Button 
+                  onClick={handleManualComplete}
+                  disabled={isSubmitting || !alternativeDescription.trim()}
+                  className="w-full mt-4"
+                >
+                  {isSubmitting ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                  <div className="flex items-center justify-center h-48 border-2 border-dashed rounded-md border-gray-300 dark:border-gray-700 p-4">
+                    <div className="flex flex-col items-center justify-center py-4">
+                      <Camera className="h-12 w-12 text-gray-400 mb-2" />
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
+                        Adicione uma foto da sua refeição
+                      </p>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        Escolher imagem
+                      </Button>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        ref={fileInputRef}
+                        className="hidden"
+                        onChange={handlePhotoUpload}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                    <Check className="h-4 w-4 mr-2" />
+                  ) : (
+                  <div className="flex items-center justify-center h-48 border-2 border-dashed rounded-md border-gray-300 dark:border-gray-700 p-4">
+                    <div className="flex flex-col items-center justify-center py-4">
+                      <Camera className="h-12 w-12 text-gray-400 mb-2" />
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
+                        Adicione uma foto da sua refeição
+                      </p>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        Escolher imagem
+                      </Button>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        ref={fileInputRef}
+                        className="hidden"
+                        onChange={handlePhotoUpload}
+                      />
+                    </div>
+                  </div>
+                )}
+                  Registrar refeição
+                </Button>
+              )}
+            </TabsContent>
+          </Tabs>
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
+  );
+};
+
+export default MealInfoModal;

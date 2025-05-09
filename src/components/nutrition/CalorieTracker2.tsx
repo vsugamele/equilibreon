@@ -78,9 +78,21 @@ const CalorieTracker2: React.FC<CalorieTrackerProps> = ({ className }) => {
     targetCalories: 2500
   });
   
-  // Escutar eventos de atualização de calorias de outros componentes
+  // Carregar valores iniciais e escutar eventos de atualização
   useEffect(() => {
+    // Forçar carregamento inicial das calorias do localStorage
+    const storedCalories = localStorage.getItem('nutri-mindflow-calories');
+    if (storedCalories) {
+      const calories = parseInt(storedCalories);
+      setCalorieData(prev => ({
+        ...prev,
+        consumedCalories: calories
+      }));
+      console.log('CalorieTracker2: Calorias carregadas do localStorage:', calories);
+    }
+
     const handleCaloriesUpdated = (e: any) => {
+      console.log('CalorieTracker2: Evento calories-updated recebido:', e.detail);
       const { calories } = e.detail;
       setCalorieData(prev => ({
         ...prev,
@@ -88,12 +100,23 @@ const CalorieTracker2: React.FC<CalorieTrackerProps> = ({ className }) => {
       }));
     };
     
-    // Registrar ouvinte de evento
-    window.addEventListener('calories-updated', handleCaloriesUpdated);
+    const handleMealAdded = (e: any) => {
+      console.log('CalorieTracker2: Evento meal-added recebido:', e.detail);
+      const { mealCalories } = e.detail;
+      setCalorieData(prev => ({
+        ...prev,
+        consumedCalories: prev.consumedCalories + mealCalories
+      }));
+    };
     
-    // Limpar ouvinte ao desmontar
+    // Registrar ouvintes de eventos
+    window.addEventListener('calories-updated', handleCaloriesUpdated);
+    window.addEventListener('meal-added', handleMealAdded);
+    
+    // Limpar ouvintes ao desmontar
     return () => {
       window.removeEventListener('calories-updated', handleCaloriesUpdated);
+      window.removeEventListener('meal-added', handleMealAdded);
     };
   }, []);
   

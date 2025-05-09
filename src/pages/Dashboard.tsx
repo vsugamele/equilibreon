@@ -43,6 +43,8 @@ import NutritionistScheduler from '@/components/appointments/NutritionistSchedul
 import WaterIntakeTracker from '@/components/water/WaterIntakeTracker';
 import CalorieTracker2 from '@/components/nutrition/CalorieTracker2';
 import MealTracker from '@/components/nutrition/MealTracker';
+import { checkAndResetDailyMeals, backupDailyData } from '@/services/dailyResetService';
+import { generateDailySummary } from '@/services/nutritionSummaryService';
 
 const Dashboard = () => {
   const [currentDate] = useState(new Date());
@@ -54,6 +56,7 @@ const Dashboard = () => {
   const isMobile = useIsMobile();
   
   // Função para buscar o perfil do usuário e obter o nome real
+  // e também inicializar o sistema de rastreamento diário
   useEffect(() => {
     const fetchUserProfile = async () => {
       try {
@@ -78,6 +81,27 @@ const Dashboard = () => {
         
         // Verificar nome do usuário nas várias fontes possíveis
         let userFullName = '';
+        
+        // Inicializar o sistema de refeições para o dia (reset automático)
+        if (data && user) {
+          try {
+            const userId = user.id;
+            
+            // Fazer backup e gerar resumo de ontem, se houver
+            await backupDailyData(userId);
+            
+            // Gerar resumo de ontem para análises
+            const yesterday = new Date();
+            yesterday.setDate(yesterday.getDate() - 1);
+            const yesterdayStr = yesterday.toISOString().split('T')[0];
+            await generateDailySummary(userId, yesterdayStr);
+            
+            // Note: Vamos verificar se precisa fazer reset para o novo dia *depois* 
+            // de ter definido as refeições padrão mais abaixo no código
+          } catch (error) {
+            console.error('Erro ao inicializar sistema diário:', error);
+          }
+        }
         
         // Primeiro verificar no name do perfil principal
         if (data.name) {
@@ -224,6 +248,25 @@ const Dashboard = () => {
       window.removeEventListener('storage', loadMealStatus);
     };
   }, []);
+
+  useEffect(() => {
+    const checkDailyReset = async () => {
+      try {
+        if (todaysMeals.length > 0) {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+            // Agora podemos chamar a função com as refeições carregadas
+            await checkAndResetDailyMeals(todaysMeals);
+            console.log('Verificação de reset diário concluída com sucesso');
+          }
+        }
+      } catch (error) {
+        console.error('Erro ao verificar reset diário:', error);
+      }
+    };
+    
+    checkDailyReset();
+  }, [todaysMeals]);
 
   const formatDate = (date: Date) => {
     return date.toLocaleDateString('pt-BR', {
