@@ -138,10 +138,19 @@ const MealDetailsModal: React.FC<MealDetailsModalProps> = ({ meal, onMealComplet
           fat: mealFat,
           fiber: 0,
           confidence: 1,
-          analysisSummary: mealDescription,
-          foodItems: mealFoods.map(food => ({ name: food })),
-          analyzedAt: new Date().toISOString(),
-          categories: []
+          // Garantir que foodItems tenha todos os campos obrigatórios
+          foodItems: mealFoods.map(food => ({
+            name: food,
+            calories: Math.round(mealCalories / Math.max(mealFoods.length, 1)),
+            portion: '1 porção'
+          })),
+          sugar: 0,
+          sodium: 0,
+          imageUrl: '',
+          categories: [],
+          healthScore: 5,
+          dietaryTags: [],
+          userRecommendations: []
         };
         
         // Salvar no histórico

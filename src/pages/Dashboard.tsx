@@ -12,7 +12,27 @@ import { Button } from "@/components/ui/button";
 import { scheduleNotifications } from '@/services/notificationService';
 import { toast } from 'sonner';
 import ProgressSummary from '@/components/progress/ProgressSummary';
-import MealDetailsModal, { MealDetailsType } from '@/components/nutrition/MealDetailsModal';
+import MealInfoModal from '@/components/nutrition/MealInfoModal';
+interface MealDetailsType {
+  id: number;
+  name: string;
+  time: string;
+  alternativeText?: string;
+  completed?: boolean;
+  status?: string;
+  description?: string;
+  foods?: string[];
+  calories?: number;
+  protein?: number;
+  carbs?: number;
+  fat?: number;
+  nutrition?: {
+    calories: number;
+    protein: number;
+    carbs: number;
+    fat: number;
+  };
+}
 import AIGreeting from '@/components/dashboard/AIGreeting';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -166,6 +186,44 @@ const Dashboard = () => {
       cleanupNotifications();
     };
   }, []);
+  
+  // Efeito para carregar o status inicial das refeições
+  useEffect(() => {
+    // Carregar status das refeições quando o componente montar
+    loadMealStatus();
+    
+    // Adicionar listeners para atualizações de status de refeições
+    const handleMealCompleted = (event: CustomEvent) => {
+      console.log('Evento meal-completed recebido:', event.detail);
+      const { mealId } = event.detail;
+      
+      // Atualizar o estado das refeições para marcar a concluída
+      setTodaysMeals(currentMeals => {
+        return currentMeals.map(meal => {
+          if (meal.id === mealId) {
+            console.log(`Atualizando refeição ${meal.name} (ID: ${mealId}) para completed`);
+            return { ...meal, status: 'completed' };
+          }
+          return meal;
+        });
+      });
+    };
+    
+    // Adicionar listener para o evento de refeição concluída
+    window.addEventListener('meal-completed', handleMealCompleted as EventListener);
+    
+    // Adicionar listener para atualização do localStorage
+    window.addEventListener('storage', () => {
+      console.log('Evento storage detectado, recarregando status das refeições');
+      loadMealStatus();
+    });
+    
+    // Limpar listeners quando o componente desmontar
+    return () => {
+      window.removeEventListener('meal-completed', handleMealCompleted as EventListener);
+      window.removeEventListener('storage', loadMealStatus);
+    };
+  }, []);
 
   const formatDate = (date: Date) => {
     return date.toLocaleDateString('pt-BR', {
@@ -245,6 +303,80 @@ const Dashboard = () => {
 
   // Função para marcar uma refeição como concluída
   const handleMealCompleted = (mealId: number) => {
+    // Encontrar a refeição pelo ID
+    const targetMeal = todaysMeals.find(meal => meal.id === mealId);
+    
+    // Verificar se há dados de análise da IA para esta refeição
+    const savedMeals = localStorage.getItem('nutri-mindflow-meals');
+    let analysisData = null;
+    let actualCalories = 0;
+    
+    if (savedMeals) {
+      try {
+        const meals = JSON.parse(savedMeals);
+        const mealData = meals.find((m: any) => m.id === mealId);
+        
+        if (mealData && mealData.analysisId) {
+          // Refeição tem análise de IA - buscar dados completos
+          const savedAnalyses = localStorage.getItem('nutri-mindflow-analyses') || '{}';
+          const analyses = JSON.parse(savedAnalyses);
+          analysisData = analyses[mealData.analysisId];
+          
+          // Usar as calorias exatas da análise da IA
+          if (analysisData && analysisData.calories) {
+            actualCalories = analysisData.calories;
+            console.log('Usando calorias da análise de IA:', actualCalories);
+          }
+        }
+        
+        // Se não tiver análise de IA, usar os dados da refeição padrão
+        if (!actualCalories && mealData && mealData.nutrition && mealData.nutrition.calories) {
+          actualCalories = mealData.nutrition.calories;
+          console.log('Usando calorias salvas na refeição:', actualCalories);
+        }
+      } catch (error) {
+        console.error('Erro ao ler dados de análise:', error);
+      }
+    }
+    
+    // Se ainda não temos calorias, usar a informação padrão da refeição
+    if (!actualCalories && targetMeal && targetMeal.calories) {
+      actualCalories = targetMeal.calories;
+      console.log('Usando calorias padrão da refeição:', actualCalories);
+    }
+    
+    // Adicionar as calorias ao contador
+    if (actualCalories > 0) {
+      try {
+        // Adicionar calorias ao contador via localStorage
+        const currentCalories = localStorage.getItem('nutri-mindflow-calories') || '0';
+        const newCalories = parseInt(currentCalories) + actualCalories;
+        localStorage.setItem('nutri-mindflow-calories', newCalories.toString());
+        
+        console.log(`Adicionadas ${actualCalories} calorias ao contador. Novo total: ${newCalories}`);
+        
+        // Emitir evento para atualizar a interface
+        const event = new CustomEvent('calories-updated', { 
+          detail: { calories: newCalories, added: actualCalories } 
+        });
+        window.dispatchEvent(event);
+        
+        // Emitir evento de refeição completa para outros componentes
+        const mealEvent = new CustomEvent('meal-completed', {
+          detail: { 
+            mealId: targetMeal ? targetMeal.id : mealId,
+            calories: actualCalories,
+            foods: targetMeal ? (targetMeal.foods || []) : [],
+            analysisData: analysisData,  // Incluir dados da análise
+            timestamp: new Date().toISOString()
+          }
+        });
+        window.dispatchEvent(mealEvent);
+      } catch (error) {
+        console.error('Erro ao adicionar calorias da refeição:', error);
+      }
+    }
+    
     // Usando 'completed' como status tipado corretamente
     setTodaysMeals(meals => meals.map(meal => {
       if (meal.id === mealId) {
@@ -254,8 +386,10 @@ const Dashboard = () => {
     }));
     
     // Usar o toast da biblioteca sonner
-    toast('Refeição marcada como concluída!', {
-      description: 'A refeição foi adicionada ao seu diário.',
+    toast.success('Refeição marcada como concluída!', {
+      description: targetMeal?.calories ? 
+        `${targetMeal.calories} calorias foram adicionadas ao seu diário.` : 
+        'A refeição foi adicionada ao seu diário.',
       action: {
         label: 'Desfazer',
         onClick: () => handleUndoMealCompleted(mealId)
@@ -290,7 +424,8 @@ const Dashboard = () => {
           </Button>
         </div>
         <div className="space-y-4">
-          {todaysMeals.map(meal => <div key={meal.id} className="flex items-center p-4 rounded-lg border border-slate-100 hover:border-brand-100 hover:bg-brand-50/30 transition-colors">
+          {todaysMeals.map(meal => (
+            <div key={meal.id} className="flex items-center p-4 rounded-lg border border-slate-100 hover:border-brand-100 hover:bg-brand-50/30 transition-colors">
               <div className={`w-10 h-10 rounded-full flex items-center justify-center mr-4 ${meal.status === 'completed' ? 'bg-green-100 text-green-600' : 'bg-blue-100 text-blue-600'}`}>
                 <Clock className="h-5 w-5" />
               </div>
@@ -298,37 +433,51 @@ const Dashboard = () => {
                 <p className="text-sm text-slate-500">{meal.time}</p>
                 <p className="font-medium text-slate-900">{meal.name}</p>
               </div>
+              
               {meal.status === 'completed' ? (
                 <div className="flex gap-2">
                   <Button 
                     variant="outline" 
                     size="sm" 
-                    className="text-amber-600 border-amber-300 hover:bg-amber-50"
+                    className="text-amber-600 border-amber-300 hover:bg-amber-50 h-9 px-3 text-xs whitespace-nowrap"
                     onClick={() => handleUndoMealCompleted(meal.id)}
                   >
-                    <RefreshCw className="h-4 w-4 mr-1" />
+                    <RefreshCw className="h-3 w-3 mr-1" />
                     Desfazer
                   </Button>
-                  <MealDetailsModal 
+                  
+                  <MealInfoModal 
                     meal={meal} 
-                    onMealCompleted={() => {}} 
+                    onMealCompleted={handleMealCompleted} 
                     onUndoMealCompleted={handleUndoMealCompleted}
-                    trigger={<Button size="sm" className="bg-green-600 hover:bg-green-700 text-white">
+                    trigger={<Button variant="outline" size="sm" className="text-slate-600 border-slate-300 hover:bg-slate-50 h-9 px-3 text-xs whitespace-nowrap">
                       Ver detalhes
-                    </Button>} 
+                    </Button>}
                   />
                 </div>
               ) : (
-                <MealDetailsModal 
-                  meal={meal} 
-                  onMealCompleted={handleMealCompleted} 
-                  onUndoMealCompleted={handleUndoMealCompleted}
-                  trigger={<Button size="sm" className="bg-teal-600 hover:bg-teal-700 text-white">
-                    Ver refeição
-                  </Button>} 
-                />
+                <div className="flex gap-2">
+                  <Button 
+                    variant="default" 
+                    size="sm" 
+                    className="bg-green-600 hover:bg-green-700 text-white h-9 px-3 text-xs whitespace-nowrap"
+                    onClick={() => handleMealCompleted(meal.id)}
+                  >
+                    Confirmar {meal.name}
+                  </Button>
+                  
+                  <MealInfoModal 
+                    meal={meal} 
+                    onMealCompleted={handleMealCompleted} 
+                    onUndoMealCompleted={handleUndoMealCompleted}
+                    trigger={<Button variant="outline" size="sm" className="text-slate-600 border-slate-300 hover:bg-slate-50 h-9 px-3 text-xs whitespace-nowrap">
+                      Ver detalhes
+                    </Button>}
+                  />
+                </div>
               )}
-            </div>)}
+            </div>
+          ))}
         </div>
       </div>;
   };
