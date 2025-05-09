@@ -35,6 +35,7 @@ import HistoryPage from "./pages/HistoryPage";
 import NotFound from './pages/NotFound';
 import ShowUserId from './show-user-id';
 import ProgressAnalytics from './pages/ProgressAnalytics';
+import AdherenceMetricsPage from './pages/AdherenceMetricsPage';
 import AdminReferenceLibraryPage from './pages/AdminReferenceLibraryPage';
 import EnhancedAdminReferencePage from './pages/EnhancedAdminReferencePage';
 import { AuthProvider } from './components/auth/AuthProvider';
@@ -128,6 +129,11 @@ function App() {
               <Route path="/progress-analytics" element={
                 <ProtectedRoute>
                   <ProgressAnalytics />
+                </ProtectedRoute>
+              } />
+              <Route path="/adherence-metrics" element={
+                <ProtectedRoute>
+                  <AdherenceMetricsPage />
                 </ProtectedRoute>
               } />
               <Route path="/epigenetic-assessment" element={

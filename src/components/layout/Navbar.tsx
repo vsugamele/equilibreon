@@ -71,6 +71,9 @@ const Navbar = () => {
                   <Link to="/progress-analytics" className="text-slate-600 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white px-3 py-2 rounded-md text-sm font-medium">
                     Análise de Progresso
                   </Link>
+                  <Link to="/adherence-metrics" className="text-slate-600 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white px-3 py-2 rounded-md text-sm font-medium">
+                    Métricas de Aderência
+                  </Link>
                   <Link to="/emotional-support" className="text-slate-600 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white px-3 py-2 rounded-md text-sm font-medium">
                     Suporte Emocional
                   </Link>
@@ -137,6 +140,9 @@ const Navbar = () => {
                 </Link>
                 <Link to="/progress-analytics" className="block px-3 py-2 rounded-md text-base font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-200 dark:hover:text-white dark:hover:bg-slate-800" onClick={() => setIsOpen(false)}>
                   Análise de Progresso
+                </Link>
+                <Link to="/adherence-metrics" className="block px-3 py-2 rounded-md text-base font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-200 dark:hover:text-white dark:hover:bg-slate-800" onClick={() => setIsOpen(false)}>
+                  Métricas de Aderência
                 </Link>
                 <Link to="/emotional-support" className="block px-3 py-2 rounded-md text-base font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-200 dark:hover:text-white dark:hover:bg-slate-800" onClick={() => setIsOpen(false)}>
                   Suporte Emocional
