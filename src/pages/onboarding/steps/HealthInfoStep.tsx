@@ -8,6 +8,7 @@ import { Heart, Pill, PlusCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Button } from '@/components/ui/button';
+import SupplementsForm from '../../../components/onboarding/SupplementsForm';
 
 interface HealthInfoStepProps {
   formData: any;
@@ -175,26 +176,22 @@ const HealthInfoStep: React.FC<HealthInfoStepProps> = ({ formData, updateFormDat
           </AccordionItem>
         </Accordion>
 
-        <div className="space-y-3 bg-white dark:bg-slate-900 p-5 rounded-lg border border-slate-200 dark:border-slate-700">
-          <Label htmlFor="supplements" className="text-lg font-medium dark:text-gray-200">Suplementos que você utiliza atualmente</Label>
-          <Textarea 
-            id="supplements" 
-            value={formData.supplements || ''} 
-            onChange={(e) => updateFormData({ supplements: e.target.value })} 
-            placeholder="Liste os suplementos que você toma regularmente (vitaminas, minerais, proteínas, etc.)"
-            className="min-h-20 text-base p-3 dark:bg-slate-800 dark:text-gray-200 dark:placeholder-slate-400"
-          />
-        </div>
 
         <div className="space-y-3 bg-white dark:bg-slate-900 p-5 rounded-lg border border-slate-200 dark:border-slate-700">
-          <Label htmlFor="supplementDosage" className="text-lg font-medium dark:text-gray-200">Quantidade dos suplementos e periodicidade:</Label>
-          <Textarea 
-            id="supplementDosage" 
-            value={formData.supplementDosage || ''} 
-            onChange={(e) => updateFormData({ supplementDosage: e.target.value })} 
-            placeholder="Exemplo: Vitamina D - 2000UI - 1x ao dia"
-            className="min-h-20 text-base p-3 dark:bg-slate-800 dark:text-gray-200 dark:placeholder-slate-400"
-          />
+          <div>
+            <SupplementsForm
+              onSupplementsChange={(supplements) => {
+                updateFormData({ 
+                  supplementList: supplements,
+                  // Manter a compatibilidade com o campo antigo
+                  supplementDosage: supplements.map(s => 
+                    `${s.name} - ${s.dosage} - ${s.frequency} - ${s.timing}`
+                  ).join('\n')
+                });
+              }}
+              initialSupplements={formData.supplementList || []}
+            />
+          </div>
         </div>
 
         <div className="space-y-4 bg-white dark:bg-slate-900 p-5 rounded-lg border border-slate-200 dark:border-slate-700">

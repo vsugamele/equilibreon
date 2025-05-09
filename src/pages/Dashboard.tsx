@@ -615,7 +615,7 @@ const Dashboard = () => {
           </Link>
         </div>
       </Card>
-      
+
       <Card className="bg-indigo-50 rounded-lg shadow-sm overflow-hidden border-none">
         <div className="p-6 flex flex-col items-center text-center">
           <MessageCircle className="h-8 w-8 text-indigo-600 mb-3" />
