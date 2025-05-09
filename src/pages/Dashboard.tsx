@@ -45,6 +45,7 @@ import CalorieTracker2 from '@/components/nutrition/CalorieTracker2';
 import MealTracker from '@/components/nutrition/MealTracker';
 import { checkAndResetDailyMeals, backupDailyData } from '@/services/dailyResetService';
 import { generateDailySummary } from '@/services/nutritionSummaryService';
+import { initializeMealReminders } from '@/services/mealReminderService';
 
 const Dashboard = () => {
   const [currentDate] = useState(new Date());
@@ -267,6 +268,17 @@ const Dashboard = () => {
     
     checkDailyReset();
   }, [todaysMeals]);
+
+  // Inicializar o sistema de lembretes de refeições
+  useEffect(() => {
+    // Inicializar o sistema de lembretes quando o Dashboard for montado
+    const cleanupReminders = initializeMealReminders();
+    
+    // Limpar o sistema de lembretes quando o Dashboard for desmontado
+    return () => {
+      cleanupReminders();
+    };
+  }, []);
 
   const formatDate = (date: Date) => {
     return date.toLocaleDateString('pt-BR', {
