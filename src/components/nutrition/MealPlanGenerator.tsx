@@ -11,6 +11,7 @@ import { useMealPlanForm } from '@/hooks/use-meal-plan-form';
 import MealPlanStepper from './meal-plan/MealPlanStepper';
 import MealPlanNavigation from './meal-plan/MealPlanNavigation';
 import { getTotalSteps, formatStepTitle } from '@/constants/meal-plan-options';
+import StepHabitsForm from './meal-plan/StepHabitsForm';
 import Step1Form from './meal-plan/Step1Form';
 import Step2Form from './meal-plan/Step2Form';
 import Step3Form from './meal-plan/Step3Form';
@@ -18,6 +19,7 @@ import Step4Form from './meal-plan/Step4Form';
 import { getPhotoAnalysisData, updateMealPlanWithPhotoAnalysis, clearPhotoAnalysisData } from '@/services/photoAnalysisIntegrationService';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { saveNutritionHabits } from '@/services/nutritionHabitsService';
 
 const MealPlanGenerator: React.FC = () => {
   const isMobile = useIsMobile();
@@ -76,12 +78,14 @@ const MealPlanGenerator: React.FC = () => {
   const renderFormStep = () => {
     switch (step) {
       case 1:
-        return <Step1Form formData={formData} updateFormData={updateFormData} />;
+        return <StepHabitsForm formData={formData} updateFormData={updateFormData} />;
       case 2:
-        return <Step2Form formData={formData} updateFormData={updateFormData} />;
+        return <Step1Form formData={formData} updateFormData={updateFormData} />;
       case 3:
-        return <Step3Form formData={formData} updateFormData={updateFormData} />;
+        return <Step2Form formData={formData} updateFormData={updateFormData} />;
       case 4:
+        return <Step3Form formData={formData} updateFormData={updateFormData} />;
+      case 5:
         return <Step4Form formData={formData} updateFormData={updateFormData} />;
       default:
         return null;
@@ -106,6 +110,24 @@ const MealPlanGenerator: React.FC = () => {
     try {
       setGenerating(true);
       toast("Aguarde enquanto criamos seu plano alimentar personalizado.");
+      
+      // Salvar os hábitos alimentares e de exercício no Supabase
+      if (formData.mealSchedule || formData.mealQuantities || formData.waterIntake || 
+          formData.supplements || formData.exerciseSchedule || formData.generalNotes) {
+        try {
+          await saveNutritionHabits({
+            meal_schedule: formData.mealSchedule || '',
+            meal_quantities: formData.mealQuantities || '',
+            water_intake: formData.waterIntake || '',
+            supplements: formData.supplements || '',
+            exercise_schedule: formData.exerciseSchedule || '',
+            general_notes: formData.generalNotes || ''
+          });
+        } catch (error) {
+          console.error('Erro ao salvar hábitos nutricionais:', error);
+          // Continuamos mesmo com erro para não bloquear a geração do plano
+        }
+      }
 
       const dietPreferences = formData.mealPlanStyle;
       const healthGoals = formData.nutritionalFocus;

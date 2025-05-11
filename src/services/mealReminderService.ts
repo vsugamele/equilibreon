@@ -227,7 +227,7 @@ const getRecentlyCompletedMeals = async (userId: string): Promise<number[]> => {
     
     const { data, error } = await supabase
       .from('meal_records')
-      .select('meal_id')
+      .select('id')
       .eq('user_id', userId)
       .gte('timestamp', twoHoursAgo.toISOString());
       
@@ -236,7 +236,11 @@ const getRecentlyCompletedMeals = async (userId: string): Promise<number[]> => {
       return [];
     }
     
-    return data?.map(record => record.meal_id) || [];
+    // Converter o id (que pode ser string) para número
+    return data?.map(record => {
+      const numericId = parseInt(record.id);
+      return isNaN(numericId) ? 0 : numericId;
+    }) || [];
   } catch (error) {
     console.error("Erro ao verificar refeições recentes:", error);
     return [];

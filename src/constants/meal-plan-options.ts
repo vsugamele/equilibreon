@@ -194,16 +194,18 @@ export const nutritionalFocusOptions = [
 export const formatStepTitle = (step: number): string => {
   switch (step) {
     case 1:
-      return "Metabolismo e Percepção";
+      return "Hábitos Alimentares e Exercício";
     case 2:
-      return "Hábitos Físicos e Alimentares";
+      return "Metabolismo e Percepção";
     case 3:
-      return "Atividade Física";
+      return "Hábitos Físicos e Alimentares";
     case 4:
+      return "Atividade Física";
+    case 5:
       return "Preferências de Cardápio";
     default:
       return "";
   }
 };
 
-export const getTotalSteps = () => 4;
+export const getTotalSteps = () => 5; // Agora são 5 passos (1-5)

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Navbar from '@/components/layout/Navbar';
 import Footer from '@/components/layout/Footer';
 import MobileNavbar from '@/components/layout/MobileNavbar';
-import { BarChart, Brain, CalendarDays, Clock, Dna, Heart, LineChart, MessageSquare, UserIcon, Camera, FileText, Pill, Dumbbell, Utensils, CalendarClock, MessageCircle, Droplet, Trophy, RefreshCw } from 'lucide-react';
+import { BarChart, Brain, CalendarDays, Clock, Dna, Heart, LineChart, MessageSquare, UserIcon, Camera, FileText, Pill, Dumbbell, Utensils, CalendarClock, MessageCircle, Droplet, Trophy, RefreshCw, Upload } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import CalorieAnalyzer from '@/components/nutrition/CalorieAnalyzer';
 import ExerciseTracker from '@/components/exercise/ExerciseTracker';
@@ -46,6 +46,7 @@ import MealTracker from '@/components/nutrition/MealTracker';
 import { checkAndResetDailyMeals, backupDailyData } from '@/services/dailyResetService';
 import { generateDailySummary } from '@/services/nutritionSummaryService';
 import { initializeMealReminders } from '@/services/mealReminderService';
+import Banner from '@/components/common/Banner';
 
 const Dashboard = () => {
   const [currentDate] = useState(new Date());
@@ -745,16 +746,7 @@ const Dashboard = () => {
               </div>
             </div>
 
-            <div className="border border-dashed border-purple-300 rounded-xl p-6 text-center bg-transparent">
-              <div className="max-w-2xl mx-auto text-purple-800">
-                <h3 className="text-2xl font-display font-semibold mb-4 leading-tight">
-                  Você está prestes a viver algo transformador.
-                </h3>
-                <p className="text-lg mb-4 opacity-90">
-                  Esse é o primeiro passo para ativar a sua melhor versão. Vamos juntas?
-                </p>
-              </div>
-            </div>
+            <Banner position="dashboard" />
 
             <div className="bg-gradient-to-r from-teal-500 to-green-600 rounded-xl shadow-md p-5">
               <div className="flex flex-col md:flex-row items-center justify-between gap-4">

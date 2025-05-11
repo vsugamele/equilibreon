@@ -30,6 +30,7 @@ import EpigeneticAssessment from './pages/EpigeneticAssessment';
 import SupplementsPage from './pages/SupplementsPage';
 import MedicalExamsPage from './pages/MedicalExamsPage';
 import AdminDashboard from './pages/AdminDashboard';
+import BannerAdmin from './pages/BannerAdmin';
 import FoodAnalysisPage from "./pages/FoodAnalysisPage";
 import HistoryPage from "./pages/HistoryPage";
 import NotFound from './pages/NotFound';
@@ -149,6 +150,11 @@ function App() {
               <Route path="/admin" element={
                 <ProtectedRoute>
                   <AdminDashboard />
+                </ProtectedRoute>
+              } />
+              <Route path="/banner-admin" element={
+                <ProtectedRoute>
+                  <BannerAdmin />
                 </ProtectedRoute>
               } />
               
