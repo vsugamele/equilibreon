@@ -40,7 +40,8 @@ import { supabase } from '@/integrations/supabase/client';
 import ExerciseGoalTracker from '@/components/dashboard/ExerciseGoalTracker';
 import SupplementationTracker from '@/components/dashboard/SupplementationTracker';
 import NutritionistScheduler from '@/components/appointments/NutritionistScheduler';
-import WaterIntakeTracker from '@/components/water/WaterIntakeTracker';
+import WaterIntakeTracker from '@/components/nutrition/WaterIntakeTracker';
+import WaterIntakeHistory from '@/components/nutrition/WaterIntakeHistory';
 import CalorieTracker2 from '@/components/nutrition/CalorieTracker2';
 import MealTracker from '@/components/nutrition/MealTracker';
 import { checkAndResetDailyMeals, backupDailyData } from '@/services/dailyResetService';
@@ -836,11 +837,8 @@ const Dashboard = () => {
               </Card>
             </div>}
           
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 space-y-6">
-            </div>
-            
-            <div className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="md:col-span-2 lg:col-span-3">
               <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-slate-100 dark:border-gray-700 p-6">
                 <h2 className="text-lg font-display font-semibold mb-4 dark:text-white">Acesso Rápido</h2>
                 <div className="grid grid-cols-2 gap-3">

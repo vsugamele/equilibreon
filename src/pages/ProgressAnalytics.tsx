@@ -4,7 +4,9 @@ import { supabase } from '../lib/supabase';
 import { toast } from 'sonner';
 import NutritionTrendsChart from '../components/progress/NutritionTrendsChart';
 import NutritionInsights from '../components/progress/NutritionInsights';
+import WeeklyProgressSummary from '../components/progress/WeeklyProgressSummary';
 import { exportProgressDataToCSV, getProgressMetrics, generateProgressReport, comparePeriods } from '../services/progressAnalyticsService';
+import { getPersonalizedTips, generateWeeklySummary } from '../services/motivationService';
 
 const ProgressAnalytics: React.FC = () => {
   const navigate = useNavigate();
@@ -108,6 +110,11 @@ const ProgressAnalytics: React.FC = () => {
         <p className="text-gray-600 mt-2">
           Visualize seu progresso, tendências e insights personalizados
         </p>
+      </div>
+      
+      {/* Resumo Semanal com Feedback Personalizado */}
+      <div className="mb-8">
+        <WeeklyProgressSummary userId={userId} />
       </div>
       
       {/* Filtros e Controles */}
