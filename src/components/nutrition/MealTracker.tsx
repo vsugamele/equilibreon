@@ -114,13 +114,74 @@ const MealTracker: React.FC<MealTrackerProps> = ({ className }) => {
         });
       }
     };
+
+    // Handler para evento de refeição registrada pelo MealInfoModal
+    const handleMealRegistered = (event: CustomEvent) => {
+      console.log('Evento meal-registered recebido:', event.detail);
+
+      if (event.detail) {
+        const { calories, protein, carbs, fat, mealType } = event.detail;
+        
+        // Determinar o nome da refeição com base no tipo
+        let mealName = 'Refeição';
+        switch(mealType) {
+          case 'breakfast': mealName = 'Café da manhã'; break;
+          case 'lunch': mealName = 'Almoço'; break;
+          case 'dinner': mealName = 'Jantar'; break;
+          case 'morning_snack': mealName = 'Lanche da manhã'; break;
+          case 'afternoon_snack': mealName = 'Lanche da tarde'; break;
+          case 'supper': mealName = 'Ceia'; break;
+        }
+        
+        // Criar nova refeição a partir dos dados
+        const newMeal: Meal = {
+          id: Date.now(),
+          name: mealName,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          nutrition: {
+            calories,
+            protein,
+            carbs,
+            fat
+          }
+        };
+        
+        // Adicionar à lista de refeições
+        const updatedMeals = [...meals, newMeal];
+        setMeals(updatedMeals);
+        saveLocalMeals(updatedMeals);
+        
+        // Disparar evento para atualizar contadores de calorias
+        const updateCaloriesEvent = new CustomEvent('calories-updated', {
+          detail: { 
+            calories, 
+            protein, 
+            carbs, 
+            fat,
+            operation: 'add' // Indica que deve SOMAR e não substituir
+          }
+        });
+        window.dispatchEvent(updateCaloriesEvent);
+        
+        // Notificar outros componentes sobre a alteração
+        document.dispatchEvent(new CustomEvent('meal-status-changed', { 
+          detail: { mealType }
+        }));
+
+        toast.success(`${mealName} registrado(a)`, {
+          description: `Refeição adicionada com ${calories} calorias.`
+        });
+      }
+    };
     
-    // Adicionar event listener
+    // Adicionar event listeners
     window.addEventListener('meal-added', handleMealAdded as EventListener);
+    window.addEventListener('meal-registered', handleMealRegistered as EventListener);
     
     // Cleanup
     return () => {
       window.removeEventListener('meal-added', handleMealAdded as EventListener);
+      window.removeEventListener('meal-registered', handleMealRegistered as EventListener);
     };
   }, [meals]);
   
@@ -167,7 +228,7 @@ const MealTracker: React.FC<MealTrackerProps> = ({ className }) => {
   };
   
   // Handler para quando uma refeição é confirmada após análise com IA
-  const handleMealAnalysisConfirmed = (analysis: MealAnalysis) => {
+  const handleMealAnalysisConfirmed = async (analysis: MealAnalysis) => {
     // Converter análise em refeição
     const newMeal = convertAnalysisToMeal(analysis);
     
@@ -178,7 +239,33 @@ const MealTracker: React.FC<MealTrackerProps> = ({ className }) => {
     
     // Adicionar ao histórico também
     saveMealToHistory(newMeal);
-    
+
+    // Salvar no Supabase
+    try {
+      const { supabase } = await import('@/integrations/supabase/client');
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const supabaseMeal = {
+          user_id: user.id,
+          meal_type: newMeal.name, // ajuste se necessário
+          calories: newMeal.nutrition?.calories,
+          protein: newMeal.nutrition?.protein,
+          carbs: newMeal.nutrition?.carbs,
+          fat: newMeal.nutrition?.fat,
+          date: newMeal.date,
+          time: newMeal.time,
+          description: newMeal.description,
+          analysis_id: newMeal.analysisId,
+        };
+        const { error } = await supabase.from('meal_records').insert([supabaseMeal]);
+        if (error) {
+          toast.error("Erro ao salvar no histórico online", { description: error.message });
+        }
+      }
+    } catch (e) {
+      toast.error("Erro ao salvar no Supabase", { description: String(e) });
+    }
+
     toast.success("Refeição analisada e registrada", {
       description: `${analysis.foodName} foi adicionado com informações nutricionais.`
     });

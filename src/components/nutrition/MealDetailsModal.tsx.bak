@@ -98,7 +98,7 @@ interface NutritionData {
   protein?: number;
   carbs?: number;
   fat?: number;
-  fiber?: number;
+  
   confidence?: number;
   foodItems?: FoodItem[];
   analysisSummary?: string;

@@ -31,6 +31,7 @@ import SupplementsPage from './pages/SupplementsPage';
 import MedicalExamsPage from './pages/MedicalExamsPage';
 import AdminDashboard from './pages/AdminDashboard';
 import BannerAdmin from './pages/BannerAdmin';
+import WaterIntakeHistoryPage from './pages/WaterIntakeHistory';
 import FoodAnalysisPage from "./pages/FoodAnalysisPage";
 import HistoryPage from "./pages/HistoryPage";
 import NotFound from './pages/NotFound';
@@ -44,11 +45,36 @@ import ProtectedRoute from './components/auth/ProtectedRoute';
 import { useEffect } from 'react';
 import { ensureProfileColumns } from './utils/profileMigration';
 import { NutritionProvider } from './contexts/NutritionContext';
+import { checkAndRequestWaterIntakeReset } from './services/waterIntakeResetService';
+import { applyAllMigrations } from './utils/applyDatabaseMigrations';
 
 function App() {
   useEffect(() => {
-    // Run profile migrations on app startup
-    ensureProfileColumns().catch(console.error);
+    // Run profile migrations and daily resets on app startup
+    const initializeApp = async () => {
+      try {
+        // Aplicar migrações SQL necessárias (criação de tabelas e funções)
+        console.log('Aplicando migrações SQL...');
+        await applyAllMigrations();
+        console.log('Migrações SQL aplicadas com sucesso!');
+        
+        // Verificar colunas do perfil
+        await ensureProfileColumns();
+        
+        // Verificar se é necessário resetar os dados de hidratação
+        console.log('Verificando necessidade de reset de hidratação...');
+        const resetPerformed = await checkAndRequestWaterIntakeReset();
+        if (resetPerformed) {
+          console.log('Reset diário de hidratação realizado com sucesso');
+        } else {
+          console.log('Nenhum reset de hidratação necessário');
+        }
+      } catch (error) {
+        console.error('Erro durante a inicialização do app:', error);
+      }
+    };
+    
+    initializeApp();
   }, []);
 
   return (
@@ -88,6 +114,12 @@ function App() {
                 </ProtectedRoute>
               } />
               <Route path="/profile/photos" element={
+                <ProtectedRoute>
+                  <ProfilePhotosPage />
+                </ProtectedRoute>
+              } />
+              {/* Rota alternativa para fotos de progresso */}
+              <Route path="/progress-photos" element={
                 <ProtectedRoute>
                   <ProfilePhotosPage />
                 </ProtectedRoute>
@@ -158,15 +190,25 @@ function App() {
                 </ProtectedRoute>
               } />
               
-              {/* Rota da biblioteca de referência administrativa - comentada temporariamente devido a erros */}
-              {/* <Route path="/admin/reference-library" element={
+              {/* Rota da biblioteca de referência administrativa */}
+              <Route path="/admin/reference-library" element={
                 <ProtectedRoute>
                   <AdminReferenceLibraryPage />
                 </ProtectedRoute>
-              } /> */}
+              } />
               
-              {/* Rota aprimorada para gerenciamento de materiais de referência */}
+              {/* Rotas aprimoradas para gerenciamento de materiais de referência - com alternativas para facilitar acesso */}
               <Route path="/admin/enhanced-references" element={
+                <ProtectedRoute>
+                  <EnhancedAdminReferencePage />
+                </ProtectedRoute>
+              } />
+              <Route path="/references-admin" element={
+                <ProtectedRoute>
+                  <EnhancedAdminReferencePage />
+                </ProtectedRoute>
+              } />
+              <Route path="/biblioteca-admin" element={
                 <ProtectedRoute>
                   <EnhancedAdminReferencePage />
                 </ProtectedRoute>
@@ -182,6 +224,13 @@ function App() {
               {/* Análise de Alimentos com IA - rotas públicas para facilitar o acesso */}
               <Route path="/analise-alimentos" element={<FoodAnalysisPage />} />
               <Route path="/food-analysis" element={<FoodAnalysisPage />} />
+              
+              {/* Página de histórico de hidratação */}
+              <Route path="/water-history" element={
+                <ProtectedRoute>
+                  <WaterIntakeHistoryPage />
+                </ProtectedRoute>
+              } />
               
               {/* Nova página de análise de exames médicos */}
               <Route path="/exames-medicos" element={<MedicalExamsPage />} />

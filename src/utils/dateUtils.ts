@@ -22,20 +22,79 @@ export const formatDate = (dateString: string): string => {
 };
 
 /**
- * Retorna a data atual no formato YYYY-MM-DD
+ * Converte uma data para o fuso horário do Brasil (GMT-3)
  */
-export const getCurrentDate = (): string => {
-  const now = new Date();
-  return now.toISOString().split('T')[0];
+export const toBrazilianTimeZone = (date: Date): Date => {
+  return new Date(date.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
 };
 
 /**
- * Retorna a data de N dias atrás no formato YYYY-MM-DD
+ * Obtém a timestamp atual no fuso horário do Brasil
+ */
+export const getBrazilianTimestamp = (): string => {
+  const now = new Date();
+  const brazilTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+  return brazilTime.toISOString();
+};
+
+/**
+ * Formata uma data para YYYY-MM-DD considerando o fuso horário do Brasil
+ */
+export const formatDateBrazil = (date: Date): string => {
+  const brazilTime = new Date(date.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+  const year = brazilTime.getFullYear();
+  const month = String(brazilTime.getMonth() + 1).padStart(2, '0');
+  const day = String(brazilTime.getDate()).padStart(2, '0');
+  
+  return `${year}-${month}-${day}`;
+};
+
+/**
+ * Verifica se é meia-noite no fuso horário do Brasil
+ * Útil para executar funções de reset diário
+ */
+export const isMidnightInBrazil = (): boolean => {
+  const now = new Date();
+  const brazilTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+  
+  return brazilTime.getHours() === 0 && 
+         brazilTime.getMinutes() >= 0 && 
+         brazilTime.getMinutes() <= 5; // Considera os primeiros 5 minutos da meia-noite
+};
+
+/**
+ * Retorna a data atual no formato YYYY-MM-DD considerando o fuso horário do Brasil
+ */
+export const getCurrentDate = (): string => {
+  // Usar o fuso horário brasileiro (Brasília)
+  const now = new Date();
+  const brazilTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+  
+  // Formatar no padrão YYYY-MM-DD
+  const year = brazilTime.getFullYear();
+  const month = String(brazilTime.getMonth() + 1).padStart(2, '0');
+  const day = String(brazilTime.getDate()).padStart(2, '0');
+  
+  return `${year}-${month}-${day}`;
+};
+
+/**
+ * Retorna a data de N dias atrás no formato YYYY-MM-DD considerando o fuso horário do Brasil
  */
 export const getDateDaysAgo = (days: number): string => {
-  const date = new Date();
-  date.setDate(date.getDate() - days);
-  return date.toISOString().split('T')[0];
+  // Obter a data atual no fuso horário brasileiro
+  const now = new Date();
+  const brazilTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+  
+  // Subtrair os dias
+  brazilTime.setDate(brazilTime.getDate() - days);
+  
+  // Formatar no padrão YYYY-MM-DD
+  const year = brazilTime.getFullYear();
+  const month = String(brazilTime.getMonth() + 1).padStart(2, '0');
+  const day = String(brazilTime.getDate()).padStart(2, '0');
+  
+  return `${year}-${month}-${day}`;
 };
 
 /**
@@ -67,15 +126,20 @@ export const daysBetweenDates = (date1: string, date2: string): number => {
 };
 
 /**
- * Verifica se uma data é hoje
+ * Verifica se uma data é hoje considerando o fuso horário do Brasil
  */
 export const isToday = (dateString: string): boolean => {
-  const today = new Date();
-  const date = new Date(dateString);
+  // Obter a data atual no fuso horário brasileiro
+  const now = new Date();
+  const brazilToday = new Date(now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
   
-  return date.getDate() === today.getDate() &&
-    date.getMonth() === today.getMonth() &&
-    date.getFullYear() === today.getFullYear();
+  // Converter a data de entrada para o fuso horário brasileiro
+  const date = new Date(dateString);
+  const brazilDate = new Date(date.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+  
+  return brazilDate.getDate() === brazilToday.getDate() &&
+    brazilDate.getMonth() === brazilToday.getMonth() &&
+    brazilDate.getFullYear() === brazilToday.getFullYear();
 };
 
 /**

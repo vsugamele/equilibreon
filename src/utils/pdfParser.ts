@@ -124,26 +124,25 @@ const readFileAsText = (file: File): Promise<string> => {
  */
 export const extractTextFromPDF = async (file: File): Promise<string> => {
   try {
-    // Se for um PDF, usar a biblioteca PDF.js carregada dinamicamente
-    if (file.type === 'application/pdf') {
+    // Verificar tipo de arquivo
+    if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
       try {
-        console.log('Processando PDF com PDF.js via CDN...');
+        // Se for um PDF, usar a biblioteca PDF.js carregada dinamicamente
+        console.log('Tentando processar PDF com PDF.js:', file.name);
         
         // Carregar a biblioteca PDF.js
         const pdfjsLib = await loadPdfJs();
         
-        // Converter o arquivo para ArrayBuffer
-        const arrayBuffer = await file.arrayBuffer();
+        // Converter o arquivo em ArrayBuffer
+        const fileData = await file.arrayBuffer();
+        const arrayBuffer = new Uint8Array(fileData);
         
         // Carregar o documento PDF
-        const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
-        const pdf = await loadingTask.promise;
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        let fullText = '';
         
-        // Extrair texto de todas as páginas (limitado a 10 páginas para evitar problemas de performance)
-        const numPages = Math.min(pdf.numPages, 10);
-        let fullText = `Arquivo PDF: ${file.name} (${Math.round(file.size/1024)} KB)\n\n`;
-        
-        for (let i = 1; i <= numPages; i++) {
+        // Processar cada página
+        for (let i = 1; i <= pdf.numPages; i++) {
           const page = await pdf.getPage(i);
           const textContent = await page.getTextContent();
           const pageText = textContent.items

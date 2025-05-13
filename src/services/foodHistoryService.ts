@@ -12,7 +12,7 @@ export interface FoodAnalysisHistory {
   protein: number;
   carbs: number;
   fat: number;
-  fiber: number;
+  // Removido fiber que não existe na tabela
   sugar?: number;
   sodium?: number;
   image_url?: string;
@@ -73,13 +73,15 @@ class FoodHistoryService {
           sodium: result.sodium,
           food_items: result.foodItems,
           dish_name: result.dishName,
-          categories: result.categories,
-          health_score: result.healthScore,
-          dietary_tags: result.dietaryTags,
-          user_recommendations: result.userRecommendations,
+          // Usar apenas propriedades que existem no tipo ou usar casting para evitar erros
+          categories: (result as any).categories || [],
+          health_score: result.healthScore || 0,
+          dietary_tags: result.dietaryTags || [],
+          user_recommendations: result.userRecommendations || [],
           analyzed_at: new Date().toISOString()
         }),
-        photo_url: result.imageUrl || null,
+        // Usar uma abordagem segura para a URL da imagem
+        photo_url: (result as any).imageUrl || (result as any).image_url || null,
         calories: result.calories || 0,
         protein: result.protein || 0,
         carbs: result.carbs || 0,
@@ -159,7 +161,6 @@ class FoodHistoryService {
           protein: meal.protein,
           carbs: meal.carbs,
           fat: meal.fat,
-          fiber: meal.fiber || 0,
           sugar: extraData && 'sugar' in extraData ? extraData.sugar : 0,
           sodium: extraData && 'sodium' in extraData ? extraData.sodium : 0,
           image_url: meal.photo_url,
@@ -223,7 +224,6 @@ class FoodHistoryService {
         protein: data.protein,
         carbs: data.carbs,
         fat: data.fat,
-        fiber: data.fiber || 0,
         sugar: extraData && 'sugar' in extraData ? extraData.sugar : 0,
         sodium: extraData && 'sodium' in extraData ? extraData.sodium : 0,
         image_url: data.photo_url,

@@ -3,10 +3,11 @@ import { useAuth } from '@/components/auth/AuthProvider';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ChevronLeft, Calendar, BarChart2, Droplet, Utensils } from 'lucide-react';
+import { ChevronLeft, Calendar, BarChart2, Droplet, Utensils, Dumbbell } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import foodHistoryService from '@/services/foodHistoryService';
 import { getWaterHistory } from '@/services/waterHistoryService';
+import { supabase } from '@/integrations/supabase/client';
 
 // Interfaces para os dados de histórico
 interface HistoryDay {
@@ -14,6 +15,8 @@ interface HistoryDay {
   calories: number;
   water: number;
   meals: number;
+  exercise_minutes?: number;
+  exercise_calories?: number;
 }
 
 interface FoodRecord {
@@ -24,6 +27,17 @@ interface FoodRecord {
   food_name: string;
 }
 
+interface ExerciseRecord {
+  id: string;
+  user_id: string;
+  exercise_type: string;
+  exercise_date: string;
+  duration: number;
+  calories_burned: number;
+  intensity?: string;
+  notes?: string;
+}
+
 const HistoryPage = () => {
   const { session } = useAuth();
   const navigate = useNavigate();
@@ -31,6 +45,7 @@ const HistoryPage = () => {
   const [historyData, setHistoryData] = useState<HistoryDay[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [foodRecords, setFoodRecords] = useState<FoodRecord[]>([]);
+  const [exerciseRecords, setExerciseRecords] = useState<ExerciseRecord[]>([]);
 
   // Função para formatar data
   const formatDate = (dateString: string) => {
@@ -51,26 +66,7 @@ const HistoryPage = () => {
     });
   };
 
-  // Gerar dados de exemplo para demonstração
-  const generateMockData = () => {
-    const today = new Date();
-    const mockData: HistoryDay[] = [];
-    
-    // Gerar dados para os últimos 7 dias
-    for (let i = 0; i < 7; i++) {
-      const date = new Date();
-      date.setDate(today.getDate() - i);
-      
-      mockData.push({
-        date: date.toISOString().split('T')[0],
-        calories: Math.floor(Math.random() * 1500) + 500, // Entre 500 e 2000 calorias
-        water: Math.floor(Math.random() * 8) + 1, // Entre 1 e 8 copos
-        meals: Math.floor(Math.random() * 4) + 1 // Entre 1 e 4 refeições
-      });
-    }
-    
-    setHistoryData(mockData);
-  };
+  // Essa função foi removida para usar apenas dados reais
 
   // Buscar dados do histórico
   const fetchHistoryData = async () => {
@@ -91,84 +87,137 @@ const HistoryPage = () => {
         }
       });
       
-      // Se usuário estiver autenticado, buscar dados de alimentos do banco
+      // Se usuário estiver autenticado, buscar dados do banco
       if (session?.user) {
-        // Tentar obter dados do histórico de alimentos
-        const foodHistory = await foodHistoryService.getHistory();
-        if (foodHistory && foodHistory.length > 0) {
-          setFoodRecords(foodHistory);
+        // Buscar dados de exercícios do Supabase
+        const { data: exerciseData, error: exerciseError } = await supabase
+          .from('exercise_records')
+          .select('*')
+          .eq('user_id', session.user.id)
+          .order('exercise_date', { ascending: false });
           
-          // Agrupar por dia
-          const groupedByDay: { [key: string]: HistoryDay } = {};
-          
-          foodHistory.forEach((record: FoodRecord) => {
-            const date = new Date(record.created_at).toISOString().split('T')[0];
-            
-            if (!groupedByDay[date]) {
-              groupedByDay[date] = {
-                date,
-                calories: 0,
-                water: waterByDate[date] || 0, // Usar dados reais de água se disponíveis
-                meals: 0 // Contamos cada registro como uma refeição
-              };
-            }
-            
-            groupedByDay[date].calories += record.calories;
-            groupedByDay[date].meals += 1;
-          });
-          
-          // Para datas que não têm registro de comida, mas têm de água
-          Object.keys(waterByDate).forEach(date => {
-            if (!groupedByDay[date]) {
-              groupedByDay[date] = {
-                date,
-                calories: 0,
-                water: waterByDate[date],
-                meals: 0
-              };
-            }
-          });
-          
-          const historyArray = Object.values(groupedByDay).sort(
-            (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
-          );
-          
-          setHistoryData(historyArray);
+        if (exerciseError) {
+          console.error('Erro ao buscar histórico de exercícios:', exerciseError);
         } else {
-          // Se não encontrar dados de comida, usar apenas os dados de água se disponíveis
-          if (Object.keys(waterByDate).length > 0) {
-            const historyArray = Object.keys(waterByDate).map(date => ({
-              date,
-              calories: 0,
-              water: waterByDate[date],
-              meals: 0
-            })).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+          setExerciseRecords(exerciseData || []);
+          
+          // Criar um mapa para armazenar dados de exercícios por data
+          const exerciseByDate: Record<string, { minutes: number, calories: number }> = {};
+          
+          // Processar os dados de exercícios
+          exerciseData?.forEach((record: ExerciseRecord) => {
+            const date = record.exercise_date.split('T')[0];
+            
+            if (!exerciseByDate[date]) {
+              exerciseByDate[date] = {
+                minutes: 0,
+                calories: 0
+              };
+            }
+            
+            exerciseByDate[date].minutes += record.duration;
+            exerciseByDate[date].calories += record.calories_burned;
+          });
+        
+          // Tentar obter dados do histórico de alimentos
+          const foodHistory = await foodHistoryService.getHistory();
+          if (foodHistory && foodHistory.length > 0) {
+            setFoodRecords(foodHistory);
+            
+            // Agrupar por dia
+            const groupedByDay: { [key: string]: HistoryDay } = {};
+            
+            foodHistory.forEach((record: FoodRecord) => {
+              const date = new Date(record.created_at).toISOString().split('T')[0];
+              
+              if (!groupedByDay[date]) {
+                groupedByDay[date] = {
+                  date,
+                  calories: 0,
+                  water: waterByDate[date] || 0,
+                  meals: 0,
+                  exercise_minutes: exerciseByDate[date]?.minutes || 0,
+                  exercise_calories: exerciseByDate[date]?.calories || 0
+                };
+              }
+              
+              groupedByDay[date].calories += record.calories;
+              groupedByDay[date].meals += 1;
+            });
+            
+            // Para datas que não têm registro de comida, mas têm de exercício ou água
+            Object.keys(exerciseByDate).forEach(date => {
+              if (!groupedByDay[date]) {
+                groupedByDay[date] = {
+                  date,
+                  calories: 0,
+                  water: waterByDate[date] || 0,
+                  meals: 0,
+                  exercise_minutes: exerciseByDate[date].minutes,
+                  exercise_calories: exerciseByDate[date].calories
+                };
+              } else {
+                // Se já existe, adicionar dados de exercício
+                groupedByDay[date].exercise_minutes = exerciseByDate[date].minutes;
+                groupedByDay[date].exercise_calories = exerciseByDate[date].calories;
+              }
+            });
+            
+            // Para datas que só têm registro de água
+            Object.keys(waterByDate).forEach(date => {
+              if (!groupedByDay[date]) {
+                groupedByDay[date] = {
+                  date,
+                  calories: 0,
+                  water: waterByDate[date],
+                  meals: 0,
+                  exercise_minutes: exerciseByDate[date]?.minutes || 0,
+                  exercise_calories: exerciseByDate[date]?.calories || 0
+                };
+              }
+            });
+            
+            // Converter para array e ordenar por data (mais recente primeiro)
+            const historyArray = Object.values(groupedByDay).sort((a, b) => 
+              new Date(b.date).getTime() - new Date(a.date).getTime()
+            );
             
             setHistoryData(historyArray);
           } else {
-            // Se não encontrar nenhum dado, gerar dados simulados
-            generateMockData();
+            // Se não há registros de alimentos, criar histórico apenas com exercícios e água
+            const historyArray: HistoryDay[] = [];
+            
+            // Combinar dados de exercício e água
+            const allDates = new Set([...Object.keys(exerciseByDate), ...Object.keys(waterByDate)]);
+            
+            allDates.forEach(date => {
+              historyArray.push({
+                date,
+                calories: 0,
+                water: waterByDate[date] || 0,
+                meals: 0,
+                exercise_minutes: exerciseByDate[date]?.minutes || 0,
+                exercise_calories: exerciseByDate[date]?.calories || 0
+              });
+            });
+            
+            // Ordenar por data (mais recente primeiro)
+            historyArray.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+            
+            setHistoryData(historyArray);
           }
         }
       } else {
-        // Se não estiver autenticado, usar dados simulados, mas incluir dados reais de água
-        if (Object.keys(waterByDate).length > 0) {
-          const historyArray = Object.keys(waterByDate).map(date => ({
-            date,
-            calories: Math.floor(Math.random() * 1500) + 500, // Entre 500 e 2000 calorias
-            water: waterByDate[date],
-            meals: Math.floor(Math.random() * 4) + 1 // Entre 1 e 4 refeições
-          })).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-          
-          setHistoryData(historyArray);
-        } else {
-          generateMockData();
-        }
+        // Usuário não autenticado, mostrar mensagem ou redirecionar
+        setHistoryData([]);
+        setFoodRecords([]);
+        setExerciseRecords([]);
       }
     } catch (error) {
-      console.error('Erro ao buscar histórico:', error);
-      // Fallback para dados simulados em caso de erro
-      generateMockData();
+      console.error('Erro ao buscar dados do histórico:', error);
+      setHistoryData([]);
+      setFoodRecords([]);
+      setExerciseRecords([]);
     } finally {
       setIsLoading(false);
     }
@@ -193,19 +242,23 @@ const HistoryPage = () => {
       </div>
       
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid grid-cols-2 mb-6">
+        <TabsList className="grid grid-cols-3 mb-6">
           <TabsTrigger value="summary" className="flex items-center gap-2">
             <BarChart2 className="h-4 w-4" />
             <span>Resumo Diário</span>
           </TabsTrigger>
           <TabsTrigger value="details" className="flex items-center gap-2">
-            <Calendar className="h-4 w-4" />
-            <span>Detalhes</span>
+            <Utensils className="h-4 w-4" />
+            <span>Refeições</span>
+          </TabsTrigger>
+          <TabsTrigger value="exercise" className="flex items-center gap-2">
+            <Dumbbell className="h-4 w-4" />
+            <span>Exercícios</span>
           </TabsTrigger>
         </TabsList>
         
         <TabsContent value="summary" className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
             <Card className="p-4 border border-gray-200 rounded-xl shadow-sm">
               <div className="flex items-center gap-2 mb-2">
                 <Utensils className="h-5 w-5 text-green-600" />
@@ -244,6 +297,19 @@ const HistoryPage = () => {
                   : 0} refeições
               </p>
             </Card>
+            
+            <Card className="p-4 border border-gray-200 rounded-xl shadow-sm">
+              <div className="flex items-center gap-2 mb-2">
+                <Dumbbell className="h-5 w-5 text-purple-600" />
+                <h3 className="font-semibold">Exercícios</h3>
+              </div>
+              <p className="text-sm text-gray-500 mb-2">Média diária:</p>
+              <p className="text-2xl font-bold">
+                {historyData.length > 0 
+                  ? Math.round(historyData.reduce((acc, day) => acc + (day.exercise_minutes || 0), 0) / historyData.length) 
+                  : 0} min
+              </p>
+            </Card>
           </div>
           
           <Card className="border border-gray-200 rounded-xl shadow-sm overflow-hidden">
@@ -258,12 +324,14 @@ const HistoryPage = () => {
                     <th className="py-3 px-4 text-center text-sm font-medium text-gray-500">Calorias</th>
                     <th className="py-3 px-4 text-center text-sm font-medium text-gray-500">Hidratação</th>
                     <th className="py-3 px-4 text-center text-sm font-medium text-gray-500">Refeições</th>
+                    <th className="py-3 px-4 text-center text-sm font-medium text-gray-500">Exercícios</th>
+                    <th className="py-3 px-4 text-center text-sm font-medium text-gray-500">Cal. Queimadas</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
                   {isLoading ? (
                     <tr>
-                      <td colSpan={4} className="text-center py-6">Carregando dados...</td>
+                      <td colSpan={6} className="text-center py-6">Carregando dados...</td>
                     </tr>
                   ) : historyData.length > 0 ? (
                     historyData.map((day, index) => (
@@ -280,11 +348,17 @@ const HistoryPage = () => {
                         <td className="py-4 px-4 text-center text-sm text-gray-900">
                           <span className="font-semibold">{day.meals}</span> refeições
                         </td>
+                        <td className="py-4 px-4 text-center text-sm text-gray-900">
+                          <span className="font-semibold">{day.exercise_minutes || 0}</span> min
+                        </td>
+                        <td className="py-4 px-4 text-center text-sm text-gray-900">
+                          <span className="font-semibold">{day.exercise_calories || 0}</span> kcal
+                        </td>
                       </tr>
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={4} className="text-center py-6 text-gray-500">
+                      <td colSpan={6} className="text-center py-6 text-gray-500">
                         Nenhum registro encontrado
                       </td>
                     </tr>
@@ -333,6 +407,62 @@ const HistoryPage = () => {
                     <tr>
                       <td colSpan={3} className="text-center py-6 text-gray-500">
                         Nenhum registro detalhado encontrado
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </TabsContent>
+        
+        <TabsContent value="exercise" className="space-y-4">
+          <Card className="border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+            <div className="p-4 bg-gray-50 border-b">
+              <h3 className="font-semibold">Detalhes de Exercícios</h3>
+            </div>
+            <div className="p-0">
+              <table className="w-full">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="py-3 px-4 text-left text-sm font-medium text-gray-500">Data/Hora</th>
+                    <th className="py-3 px-4 text-left text-sm font-medium text-gray-500">Tipo</th>
+                    <th className="py-3 px-4 text-center text-sm font-medium text-gray-500">Duração</th>
+                    <th className="py-3 px-4 text-center text-sm font-medium text-gray-500">Calorias</th>
+                    <th className="py-3 px-4 text-left text-sm font-medium text-gray-500">Notas</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {isLoading ? (
+                    <tr>
+                      <td colSpan={5} className="text-center py-6">Carregando dados...</td>
+                    </tr>
+                  ) : exerciseRecords.length > 0 ? (
+                    exerciseRecords.map((record, index) => (
+                      <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                        <td className="py-4 px-4 text-sm text-gray-900">
+                          <div className="font-medium">{formatDate(record.exercise_date)}</div>
+                          <div className="text-xs text-gray-500">{formatTime(record.exercise_date)}</div>
+                        </td>
+                        <td className="py-4 px-4 text-sm text-gray-900">
+                          {record.exercise_type || 'Exercício sem tipo'}
+                          {record.intensity && <span className="ml-1 text-xs text-gray-500">({record.intensity})</span>}
+                        </td>
+                        <td className="py-4 px-4 text-center text-sm font-medium text-gray-900">
+                          {record.duration} min
+                        </td>
+                        <td className="py-4 px-4 text-center text-sm font-medium text-gray-900">
+                          {record.calories_burned} kcal
+                        </td>
+                        <td className="py-4 px-4 text-sm text-gray-900">
+                          {record.notes || '-'}
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={5} className="text-center py-6 text-gray-500">
+                        Nenhum registro de exercício encontrado
                       </td>
                     </tr>
                   )}

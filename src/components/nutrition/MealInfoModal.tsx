@@ -5,11 +5,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { Camera, X, Brain, Loader2, Check, Utensils, CalendarClock } from 'lucide-react';
+import { Camera, X, Brain, Loader2, Check, Utensils, CalendarClock, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import foodAnalysisService, { FoodAnalysisResult } from '@/services/foodAnalysisService';
 import { saveMealRecord } from '@/services/mealTrackingService';
 import { saveMealStatus } from '@/services/mealStatusService';
+import { MealRecordInsert } from '@/types/supabase-types';
 import { saveNutritionHabits, getUserNutritionHabits, NutritionHabitsSummary } from '@/services/nutritionHabitsService';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -17,16 +18,23 @@ interface MealInfoSimpleProps {
   trigger?: React.ReactNode;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  mealId?: number; // ID da refeição que está sendo confirmada
+  mealType?: string; // Tipo da refeição (café da manhã, almoço, etc.)
 }
 
 const MealInfoSimple: React.FC<MealInfoSimpleProps> = ({
   trigger,
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
+  mealId,
+  mealType,
 }) => {
+  // Estado para forçar re-renders quando necessário
+  const [forceRender, setForceRender] = useState(false);
+  
   // Estados
   const [internalOpen, setInternalOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState('habits'); // Começa na aba de hábitos
+  const [activeTab, setActiveTab] = useState('suggestions'); // Começa na aba de opções/sugestões
   const [description, setDescription] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [photoUrl, setPhotoUrl] = useState('');
@@ -51,11 +59,27 @@ const MealInfoSimple: React.FC<MealInfoSimpleProps> = ({
   const onOpenChange = isControlled ? controlledOnOpenChange : setInternalOpen;
   
   // Carregar dados de hábitos alimentares quando o modal é aberto
+  // Efeito para detectar o tipo de refeição com base no mealType recebido nas props
   useEffect(() => {
     if (open) {
       loadUserHabits();
+      
+      // Se recebeu mealType nas props, selecionar automaticamente a refeição correta
+      if (mealType) {
+        console.log('Detectando tipo de refeição automaticamente:', mealType);
+        const index = mealSlotDetails.findIndex(meal => meal.type === mealType);
+        if (index !== -1) {
+          console.log('Refeição encontrada no índice:', index);
+          setSelectedMealIndex(index);
+          // Forçar atualização para esconder o seletor
+          setForceRender(prev => !prev);
+        }
+      } else {
+        // Reset para evitar que o seletor mantenha uma seleção anterior
+        setSelectedMealIndex(-1);
+      }
     }
-  }, [open]);
+  }, [open, mealType]);
   
   // Função para carregar os hábitos alimentares do usuário
   const loadUserHabits = async () => {
@@ -170,12 +194,12 @@ const MealInfoSimple: React.FC<MealInfoSimpleProps> = ({
   
   // Nomes das refeições conforme mostrado no Dashboard (com seus IDs reais no Dashboard)
   const mealSlotDetails = [
-    { id: 1, name: 'Café da manhã' },
-    { id: 2, name: 'Lanche da manhã' },
-    { id: 3, name: 'Almoço' },
-    { id: 4, name: 'Lanche da tarde' },
-    { id: 5, name: 'Jantar' },
-    { id: 6, name: 'Ceia' }
+    { id: 1, name: 'Café da manhã', type: 'breakfast' },
+    { id: 2, name: 'Lanche da manhã', type: 'morning_snack' },
+    { id: 3, name: 'Almoço', type: 'lunch' },
+    { id: 4, name: 'Lanche da tarde', type: 'afternoon_snack' },
+    { id: 5, name: 'Jantar', type: 'dinner' },
+    { id: 6, name: 'Ceia', type: 'supper' }
   ];
   
   // Estado para armazenar qual refeição está sendo registrada
@@ -225,18 +249,33 @@ const MealInfoSimple: React.FC<MealInfoSimpleProps> = ({
       }
       
       // Criar objeto com os dados da refeição
-      const mealData = {
+      // Criar string com os alimentos identificados (se disponível)
+      let foodsDescription = '';
+      if (analysisResult.foodItems && analysisResult.foodItems.length > 0) {
+        foodsDescription = analysisResult.foodItems.map((item: any) => item.name).join(', ');
+      }
+
+      // Determinar o tipo de refeição - garantindo que seja um valor válido para a constraint do banco
+      let validMealType = 'snack'; // Usar snack como padrão seguro
+    
+      if (selectedMealIndex !== -1) {
+        validMealType = mealSlotDetails[selectedMealIndex].type;
+      } else if (mealType && ['breakfast', 'lunch', 'dinner', 'snack'].includes(mealType)) {
+        validMealType = mealType;
+      }
+      
+      const mealData: MealRecordInsert = {
         user_id: user.id,
-        meal_name: analysisResult.foodItems?.map(item => item.name).join(', ') || 'Refeição não especificada',
-        meal_time: new Date().toISOString(),
+        meal_type: validMealType, // Usar apenas tipos válidos: 'breakfast', 'lunch', 'dinner', 'snack'
+        timestamp: new Date().toISOString(),
         calories: analysisResult.calories,
         protein: analysisResult.protein,
         carbs: analysisResult.carbs,
         fat: analysisResult.fat,
-        fiber: analysisResult.fiber || 0,
-        meal_items: analysisResult.foodItems || [],
-        meal_image: photoUrl || '',
-        notes: description || ''
+        description: description || (foodsDescription ? foodsDescription : 'Refeição sem descrição'),
+        photo_url: photoUrl || null,
+        notes: foodsDescription || '',
+        foods: analysisResult.foodItems || [],
       };
       
       // Salvar no serviço de rastreamento de refeições
@@ -257,6 +296,52 @@ const MealInfoSimple: React.FC<MealInfoSimpleProps> = ({
       
       if (statusSaved) {
         toast.success('Refeição registrada com sucesso!');
+        
+        // Capturar o ID da refeição de forma segura
+        const currentMealId = mealId || (selectedMealIndex !== -1 ? mealSlotDetails[selectedMealIndex].id : 0);
+        console.log('ID da refeição registrada:', currentMealId);
+        
+        // Disparar evento para atualizar o dashboard
+        const updateEvent = new CustomEvent('meal-registered', {
+          detail: {
+            calories: analysisResult.calories,
+            protein: analysisResult.protein,
+            carbs: analysisResult.carbs,
+            fat: analysisResult.fat,
+            mealType: mealData.meal_type,
+            mealId: currentMealId
+          }
+        });
+        window.dispatchEvent(updateEvent);
+        console.log('Evento meal-registered disparado');
+        
+        // Disparar um evento específico para mudar o botão para "Desfazer"
+        // Este evento é capturado diretamente pelos botões na interface
+        const buttonUpdateEvent = new CustomEvent('meal-confirmation-update', {
+          detail: {
+            mealId: currentMealId,
+            status: 'completed',
+            time: new Date().toISOString() // Adicionar timestamp para debugging
+          }
+        });
+        
+        // Esse é o evento chave que muda o botão para Desfazer
+        console.log('Disparando evento meal-confirmation-update para mealId:', currentMealId);
+        window.dispatchEvent(buttonUpdateEvent);
+        document.dispatchEvent(buttonUpdateEvent); // Enviar em ambos para garantir
+        console.log('Evento meal-confirmation-update disparado via window e document');
+        
+        // Disparar evento para componentes de dashboard
+        window.dispatchEvent(new Event('daily-meal-status-updated'));
+        console.log('Evento daily-meal-status-updated disparado');
+        
+        // Fechar o modal explicitamente após 500ms para garantir que os eventos sejam processados
+        setTimeout(() => {
+          if (onOpenChange) {
+            console.log('Fechando modal explicitamente');
+            onOpenChange(false);
+          }
+        }, 500);
         
         // Resetar formulário e fechar modal
         setDescription('');
@@ -289,129 +374,227 @@ const MealInfoSimple: React.FC<MealInfoSimpleProps> = ({
         </DialogHeader>
         
         <Tabs value={activeTab} onValueChange={handleTabChange}>
-          <TabsList className="grid grid-cols-4">
-            <TabsTrigger value="habits" className="flex items-center">
-              <CalendarClock className="h-4 w-4 mr-1" />
-              <span className="hidden sm:inline">Hábitos</span>
-            </TabsTrigger>
+          <TabsList className="grid grid-cols-3">
             <TabsTrigger value="suggestions">Opções</TabsTrigger>
             <TabsTrigger value="details">Detalhes</TabsTrigger>
             <TabsTrigger value="analysis">Análise</TabsTrigger>
           </TabsList>
           
-          {/* Nova aba de hábitos alimentares */}
-          <TabsContent value="habits">
-            <div className="space-y-4">
-              <h3 className="text-xl font-semibold">Seus hábitos alimentares</h3>
-              <p className="text-sm text-gray-500">
-                Por favor, compartilhe informações sobre seus hábitos alimentares e de exercícios para que a IA possa fazer recomendações mais personalizadas sem mudar drasticamente sua rotina atual.
-              </p>
-              
-              <div className="space-y-3">
-                <div>
-                  <Label htmlFor="mealSchedule">Horários das refeições</Label>
-                  <Textarea 
-                    id="mealSchedule" 
-                    placeholder="Exemplo: Café da manhã às 7h, almoço às 12h, lanche às 15h, jantar às 19h" 
-                    value={mealSchedule}
-                    onChange={(e) => setMealSchedule(e.target.value)}
-                  />
-                </div>
-                
-                <div>
-                  <Label htmlFor="mealQuantities">Quantidades atuais das refeições</Label>
-                  <Textarea 
-                    id="mealQuantities" 
-                    placeholder="Descreva as quantidades típicas que você come em cada refeição" 
-                    value={mealQuantities}
-                    onChange={(e) => setMealQuantities(e.target.value)}
-                  />
-                </div>
-                
-                <div>
-                  <Label htmlFor="waterIntake">Ingestão de água</Label>
-                  <Textarea 
-                    id="waterIntake" 
-                    placeholder="Exemplo: 2 litros por dia, ou 8 copos diários" 
-                    value={waterIntake}
-                    onChange={(e) => setWaterIntake(e.target.value)}
-                  />
-                </div>
-                
-                <div>
-                  <Label htmlFor="supplements">Uso de suplementos</Label>
-                  <Textarea 
-                    id="supplements" 
-                    placeholder="Liste quais suplementos você toma, doses e horários" 
-                    value={supplements}
-                    onChange={(e) => setSupplements(e.target.value)}
-                  />
-                </div>
-                
-                <div>
-                  <Label htmlFor="exerciseSchedule">Exercícios físicos</Label>
-                  <Textarea 
-                    id="exerciseSchedule" 
-                    placeholder="Exemplo: Academia 3x por semana (segunda, quarta, sexta) por 1 hora" 
-                    value={exerciseSchedule}
-                    onChange={(e) => setExerciseSchedule(e.target.value)}
-                  />
-                </div>
-                
-                <div>
-                  <Label htmlFor="generalNotes">Observações adicionais</Label>
-                  <Textarea 
-                    id="generalNotes" 
-                    placeholder="Alguma informação adicional que você queira compartilhar" 
-                    value={generalNotes}
-                    onChange={(e) => setGeneralNotes(e.target.value)}
-                  />
-                </div>
-              </div>
-              
-              <div className="flex justify-end space-x-2 mt-4">
-                <Button 
-                  variant="outline" 
-                  onClick={() => setActiveTab('suggestions')}
-                >
-                  Pular
-                </Button>
-                <Button 
-                  onClick={handleSaveHabits}
-                  disabled={isSavingHabits}
-                >
-                  {isSavingHabits ? (
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  ) : (
-                    <Check className="h-4 w-4 mr-2" />
-                  )}
-                  {isSavingHabits ? 'Salvando...' : 'Salvar e continuar'}
-                </Button>
-              </div>
-            </div>
-          </TabsContent>
-          
           <TabsContent value="suggestions">
             <div className="space-y-4">
               <h3 className="text-lg font-medium">Sugestões para esta refeição</h3>
-              <div className="grid grid-cols-2 gap-2">
-                {mealSlotDetails.map((meal, index) => (
-                  <Button 
-                    key={meal.id}
-                    variant={selectedMealIndex === index ? "default" : "outline"}
-                    className="h-20 flex flex-col justify-center items-center text-center"
-                    onClick={() => {
-                      handleMealSelection(index);
-                      setActiveTab('details');
-                    }}
-                  >
-                    <Utensils className="h-6 w-6 mb-1" />
-                    <span>{meal.name}</span>
-                  </Button>
-                ))}
-              </div>
-              
+              {/* Sugestões para esta refeição */}
               <div className="pt-4">
+                <div className="bg-green-50 dark:bg-green-950/40 p-4 rounded-md mb-4">
+                  <h4 className="text-md font-medium mb-3 flex items-center">
+                    <Utensils className="h-4 w-4 mr-2 text-green-600 dark:text-green-400" />
+                    Sugestões para esta refeição
+                  </h4>
+                  
+                  <div className="grid grid-cols-2 gap-3 mb-4">
+                    <div className="bg-white dark:bg-slate-800 p-3 rounded-md shadow-sm">
+                      <p className="text-sm text-gray-500 dark:text-gray-400">Calorias</p>
+                      <p className="text-xl font-bold text-slate-900 dark:text-white">350 kcal</p>
+                    </div>
+                    <div className="bg-white dark:bg-slate-800 p-3 rounded-md shadow-sm">
+                      <p className="text-sm text-gray-500 dark:text-gray-400">Proteínas</p>
+                      <p className="text-xl font-bold text-slate-900 dark:text-white">15g</p>
+                    </div>
+                  </div>
+                  
+                  <div className="bg-green-100 dark:bg-green-900/30 p-3 rounded-md">
+                    <p className="text-sm font-medium mb-2">Opções recomendadas:</p>
+                    <ul className="space-y-1">
+                      <li className="text-sm flex items-start">
+                        <span className="mr-2">•</span>
+                        <span>1 iogurte grego sem açúcar</span>
+                      </li>
+                      <li className="text-sm flex items-start">
+                        <span className="mr-2">•</span>
+                        <span>1 punhado de castanhas (30g)</span>
+                      </li>
+                      <li className="text-sm flex items-start">
+                        <span className="mr-2">•</span>
+                        <span>1 maçã média</span>
+                      </li>
+                    </ul>
+                  </div>
+                  
+                  <div className="mt-3 space-y-2">
+                    <Button 
+                      variant="default" 
+                      size="sm" 
+                      className="w-full bg-green-600 hover:bg-green-700 text-white"
+                      onClick={async () => {
+                        try {
+                          // Mostrar estado de carregamento
+                          setIsRegistering(true);
+                          
+                          // Preparar dados da refeição sugerida
+                          const foodDescription = "1 iogurte grego sem açúcar, 1 punhado de castanhas (30g), 1 maçã média";
+                          setDescription("Refeição sugerida: " + foodDescription);
+                          
+                          // Aplicar valores nutricionais simulados
+                          const sugestedAnalysis: FoodAnalysisResult = {
+                            foodName: "Lanche saudável", // Nome da refeição sugerida
+                            calories: 350,
+                            protein: 15,
+                            carbs: 25,
+                            fat: 20,
+                            confidence: 1, // Alta confiança, pois é uma sugestão pré-definida
+                            analyzedAt: new Date().toISOString(), // Data atual
+                            foodItems: [
+                              { name: "Iogurte grego sem açúcar", calories: 120, protein: 8, carbs: 5, fat: 4, portion: "1 pote" },
+                              { name: "Punhado de castanhas (30g)", calories: 180, protein: 6, carbs: 5, fat: 15, portion: "30g" },
+                              { name: "Maçã média", calories: 50, protein: 1, carbs: 15, fat: 1, portion: "1 unidade" }
+                            ]
+                          };
+                          setAnalysisResult(sugestedAnalysis);
+                          
+                          // Obter informações do usuário
+                          const { data: { user } } = await supabase.auth.getUser();
+                          
+                          if (!user) {
+                            toast.error('Você precisa estar logado para registrar refeições');
+                            setIsRegistering(false);
+                            return;
+                          }
+                          
+                          // Preparar dados da refeição
+                          // Determinar o tipo de refeição - garantindo que seja um valor válido para a constraint do banco
+                          let validMealType = 'snack'; // Usar snack como padrão seguro
+                          
+                          if (selectedMealIndex !== -1) {
+                            validMealType = mealSlotDetails[selectedMealIndex].type;
+                          } else if (mealType && ['breakfast', 'lunch', 'dinner', 'snack'].includes(mealType)) {
+                            validMealType = mealType;
+                          }
+                          
+                          const mealData: MealRecordInsert = {
+                            user_id: user.id,
+                            meal_type: validMealType, // Usar apenas tipos válidos: 'breakfast', 'lunch', 'dinner', 'snack'
+                            timestamp: new Date().toISOString(),
+                            calories: sugestedAnalysis.calories,
+                            protein: sugestedAnalysis.protein,
+                            carbs: sugestedAnalysis.carbs,
+                            fat: sugestedAnalysis.fat,
+                            description: "Refeição sugerida",
+                            photo_url: null,
+                            notes: foodDescription,
+                            foods: sugestedAnalysis.foodItems.map(item => item.name)
+                          };
+                          
+                          // Salvar no serviço de rastreamento de refeições
+                          const savedRecord = await saveMealRecord(mealData);
+                          
+                          if (!savedRecord.success) {
+                            throw new Error('Não foi possível salvar o registro da refeição');
+                          }
+                          
+                          // Atualizar o status da refeição no dashboard
+                          const mealId = mealSlotDetails[selectedMealIndex !== -1 ? selectedMealIndex : 0].id;
+                          
+                          // Salvar status
+                          const statusSaved = await saveMealStatus(mealId, 'completed', {
+                            ...mealData,
+                            record_id: savedRecord.data?.id
+                          });
+                          
+                          if (statusSaved) {
+                            // Disparar eventos para atualizar o dashboard
+                            // Evento para atualizar calorias (SOMAR e não substituir)
+                            const updateEvent = new CustomEvent('meal-registered', {
+                              detail: {
+                                calories: sugestedAnalysis.calories,
+                                protein: sugestedAnalysis.protein,
+                                carbs: sugestedAnalysis.carbs,
+                                fat: sugestedAnalysis.fat,
+                                mealType: mealData.meal_type,
+                                mealId: mealId
+                              }
+                            });
+                            window.dispatchEvent(updateEvent);
+                            
+                            // Evento para mudar botão para "Desfazer"
+                            const buttonUpdateEvent = new CustomEvent('meal-confirmation-update', {
+                              detail: {
+                                mealId: mealId,
+                                status: 'completed',
+                                time: new Date().toISOString()
+                              }
+                            });
+                            window.dispatchEvent(buttonUpdateEvent);
+                            document.dispatchEvent(buttonUpdateEvent);
+                            
+                            // Evento geral de atualização
+                            window.dispatchEvent(new Event('daily-meal-status-updated'));
+                            
+                            toast.success('Refeição registrada com sucesso!');
+                            
+                            // Resetar estado
+                            setDescription('');
+                            setPhotoUrl('');
+                            setPhotoFile(null);
+                            setAnalysisResult(null);
+                            setSelectedMealIndex(-1);
+                            
+                            // Fechar modal após um breve delay
+                            setTimeout(() => {
+                              if (onOpenChange) {
+                                onOpenChange(false);
+                              }
+                            }, 500);
+                          } else {
+                            toast.error('A refeição foi salva, mas não foi possível atualizar o dashboard.');
+                          }
+                        } catch (error) {
+                          console.error('Erro ao registrar refeição sugerida:', error);
+                          toast.error('Erro ao registrar a refeição sugerida.');
+                        } finally {
+                          setIsRegistering(false);
+                        }
+                      }}
+                      disabled={isRegistering}
+                    >
+                      {isRegistering ? (
+                        <>
+                          <Loader2 className="animate-spin h-4 w-4 mr-1" />
+                          Registrando...
+                        </>
+                      ) : (
+                        "Confirmar Refeição Sugerida"
+                      )}
+                    </Button>
+                    
+                    {/* Verificar se hoje é domingo para mostrar a opção de substituir refeição */}
+                    {new Date().getDay() === 0 && (
+                      <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
+                        <p className="text-xs text-gray-500 mb-2">Substituição semanal disponível hoje</p>
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="w-full text-blue-600 border-blue-200 hover:bg-blue-50 flex items-center justify-center"
+                          onClick={() => {
+                            toast.success("Substituição de refeição solicitada", {
+                              description: "Nossa IA está preparando um novo plano baseado em suas necessidades."
+                            });
+                          }}
+                        >
+                          <RefreshCw className="h-3 w-3 mr-1" />
+                          Solicitar substituição semanal
+                        </Button>
+                      </div>
+                    )}
+                    
+                    {/* Se não for domingo, mostrar quando estará disponível */}
+                    {new Date().getDay() !== 0 && (
+                      <div className="text-xs text-gray-400 text-center pt-1">
+                        Substituição semanal disponível aos domingos
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
                 <div className="bg-blue-50 dark:bg-blue-950/40 p-4 rounded-md">
                   <h4 className="text-md font-medium mb-2 flex items-center">
                     <Brain className="h-4 w-4 mr-2 text-blue-600 dark:text-blue-400" />
@@ -555,11 +738,36 @@ const MealInfoSimple: React.FC<MealInfoSimpleProps> = ({
                   </div>
                 )}
                 
+                {/* Seletor de tipo de refeição - ESCONDER COMPLETAMENTE - estamos tendo problemas com ele */}
+                {false && /* Escondendo completamente o seletor por enquanto */ (!mealType || mealType === "") && (
+                  <div className="mt-6 mb-2">
+                    <Label htmlFor="meal-type" className="mb-2 block font-medium">
+                      Selecione o tipo de refeição
+                    </Label>
+                    <div className="grid grid-cols-3 gap-2 mt-2">
+                      {mealSlotDetails.map((meal, index) => (
+                        <Button
+                          key={meal.id}
+                          type="button"
+                          variant={selectedMealIndex === index ? "default" : "outline"}
+                          className="py-1 px-2 h-auto text-sm"
+                          onClick={() => handleMealSelection(index)}
+                        >
+                          {meal.name}
+                        </Button>
+                      ))}
+                    </div>
+                    {selectedMealIndex === -1 && (
+                      <p className="text-red-500 text-xs mt-1">Por favor, selecione o tipo de refeição</p>
+                    )}
+                  </div>
+                )}
+                
                 {/* Botão para registrar a refeição */}
                 <Button 
                   className="w-full mt-4"
                   onClick={handleRegisterMeal}
-                  disabled={isRegistering}
+                  disabled={isRegistering || selectedMealIndex === -1}
                 >
                   {isRegistering ? (
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />

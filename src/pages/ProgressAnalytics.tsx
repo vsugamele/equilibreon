@@ -7,6 +7,9 @@ import NutritionInsights from '../components/progress/NutritionInsights';
 import WeeklyProgressSummary from '../components/progress/WeeklyProgressSummary';
 import { exportProgressDataToCSV, getProgressMetrics, generateProgressReport, comparePeriods } from '../services/progressAnalyticsService';
 import { getPersonalizedTips, generateWeeklySummary } from '../services/motivationService';
+import Navbar from '../components/layout/Navbar';
+import MobileNavbar from '../components/layout/MobileNavbar';
+import Footer from '../components/layout/Footer';
 
 const ProgressAnalytics: React.FC = () => {
   const navigate = useNavigate();
@@ -104,7 +107,10 @@ const ProgressAnalytics: React.FC = () => {
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
+    <div className="flex flex-col min-h-screen">
+      <Navbar />
+      <main className="flex-grow bg-slate-50 pt-20 pb-20 md:pb-0">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-800">Análise de Progresso Nutricional</h1>
         <p className="text-gray-600 mt-2">
@@ -311,6 +317,10 @@ const ProgressAnalytics: React.FC = () => {
         <p>Os dados são atualizados automaticamente a cada dia quando você registra suas refeições.</p>
         <p>Para visualizar dados mais precisos, certifique-se de registrar todas as suas refeições diariamente.</p>
       </div>
+        </div>
+      </main>
+      <Footer />
+      <MobileNavbar />
     </div>
   );
 };

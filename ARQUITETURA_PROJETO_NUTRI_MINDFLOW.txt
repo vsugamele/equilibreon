@@ -1,0 +1,253 @@
+# ARQUITETURA E DOCUMENTAÇÃO DO PROJETO: NUTRI MINDFLOW
+
+## Visão Geral
+O Nutri Mindflow é um sistema completo para acompanhamento alimentar, nutricional e físico, que utiliza respostas do onboarding e do plano alimentar para personalizar a experiência do usuário (Lead), calcular calorias, sugerir exercícios, avaliar exames e monitorar o progresso.
+
+---
+
+## Fluxo Central do Sistema
+
+1. **Onboarding:**
+   - Usuário responde perguntas sobre hábitos, restrições, objetivos, saúde, etc.
+   - Respostas são salvas e usadas para personalização.
+
+2. **Plano Alimentar:**
+   - Gerado conforme respostas do onboarding.
+   - Define refeições, horários, alimentos, calorias e porções.
+
+3. **Acompanhamento Diário:**
+   - Usuário vê refeições programadas do dia (base: plano alimentar).
+   - Se comer diferente, pode registrar manualmente ou via IA (foto/análise).
+   - Sistema calcula calorias reais e compara com o plano.
+
+4. **Exercícios & Exames:**
+   - Sugestão de exercícios e avaliação de exames laboratoriais.
+   - Ajustes automáticos no plano conforme progresso/saúde.
+
+5. **Feedback & Progresso:**
+   - Usuário recebe alertas, gráficos e sugestões baseados em adesão ao plano e exames.
+
+---
+
+## Tabelas do Banco de Dados (Supabase)
+
+### 1. onboarding_answers
+- **Descrição:** Respostas do usuário no onboarding.
+- **Campos:**
+  - `id` (UUID): Identificador único
+  - `user_id` (UUID): Usuário
+  - `question_id` (string): Pergunta respondida
+  - `answer` (string): Resposta
+  - `created_at` (timestamp): Data/hora da resposta
+
+### 2. meal_plan
+- **Descrição:** Plano alimentar individual do usuário.
+- **Campos:**
+  - `id` (UUID): Identificador único
+  - `user_id` (UUID): Usuário
+  - `day_of_week` (integer): Dia da semana (0=domingo)
+  - `meal_type` (string): Tipo da refeição (café, almoço, jantar...)
+  - `food_items` (json/text): Lista de alimentos recomendados
+  - `calories` (integer): Calorias totais da refeição
+  - `scheduled_time` (time): Horário sugerido
+
+### 3. meal_records
+- **Descrição:** Registro das refeições realmente consumidas.
+- **Campos:**
+  - `id` (UUID): Identificador único
+  - `user_id` (UUID): Usuário
+  - `meal_type` (string): Tipo da refeição
+  - `timestamp` (timestamp): Data/hora do consumo
+  - `calories` (integer): Calorias consumidas
+  - `protein` (integer): Proteínas (g)
+  - `carbs` (integer): Carboidratos (g)
+  - `fat` (integer): Gorduras (g)
+  - `notes` (string): Observações do usuário
+  - `photo_url` (string): URL da foto enviada (opcional)
+  - `created_at` (timestamp): Data de criação
+  - `updated_at` (timestamp): Data de atualização
+
+### 4. daily_meal_status
+- **Descrição:** Status de cada refeição do dia.
+- **Campos:**
+  - `id` (UUID): Identificador único
+  - `user_id` (UUID): Usuário
+  - `date` (date): Data
+  - `meal_type` (string): Tipo da refeição
+  - `status` (string): Status ('planned', 'completed', 'missed', etc)
+  - `record_id` (UUID): Referência ao meal_records
+
+### 5. exercise_records
+- **Descrição:** Registro dos exercícios realizados.
+- **Campos:**
+  - `id` (UUID): Identificador único
+  - `user_id` (UUID): Usuário
+  - `exercise_type` (string): Tipo de exercício
+  - `duration` (integer): Duração em minutos
+  - `calories_burned` (integer): Calorias gastas
+  - `intensity` (string): Intensidade
+  - `timestamp` (timestamp): Data/hora
+  - `notes` (string): Observações
+  - `created_at` (timestamp): Data de criação
+  - `updated_at` (timestamp): Data de atualização
+
+### 6. weekly_exercise_summary
+- **Descrição:** Resumo semanal dos exercícios.
+- **Campos:**
+  - `id` (UUID): Identificador único
+  - `user_id` (UUID): Usuário
+  - `week_start_date` (date): Início da semana
+  - `week_end_date` (date): Fim da semana
+  - `total_minutes` (integer): Total de minutos
+  - `calories_burned` (integer): Calorias gastas
+  - `goal_minutes` (integer): Meta semanal (minutos)
+  - `goal_achieved` (boolean): Meta atingida?
+  - `last_updated` (timestamp): Última atualização
+
+### 7. lab_results
+- **Descrição:** Resultados de exames laboratoriais.
+- **Campos:**
+  - `id` (UUID): Identificador único
+  - `user_id` (UUID): Usuário
+  - `exam_type` (string): Tipo do exame
+  - `value` (float): Valor
+  - `reference` (string): Valor de referência
+  - `date` (date): Data do exame
+
+---
+
+## Comunicação Entre Funcionalidades
+
+- **Onboarding → Plano Alimentar:**
+  As respostas do onboarding determinam restrições, preferências e horários do plano alimentar.
+
+- **Plano Alimentar → Cronograma Diário:**
+  O cronograma de refeições do dia é montado a partir do plano alimentar.
+
+- **Cronograma Diário → Registro de Refeições:**
+  O usuário pode confirmar refeições planejadas ou registrar novas via IA/foto/manual. Tudo é salvo em meal_records.
+
+- **Registro de Refeições → Progresso:**
+  O sistema compara o planejado com o realizado (calorias, adesão, etc).
+
+- **Exercícios & Exames:**
+  Recomendações e ajustes são feitos com base no progresso alimentar e nos resultados laboratoriais.
+
+- **Feedback:**
+  O sistema gera gráficos, alertas e recomendações personalizadas.
+
+---
+
+## Funcionalidades Detalhadas
+
+- **Onboarding Dinâmico**: Questionários flexíveis, adaptáveis conforme perfil do usuário.
+- **Plano Alimentar Personalizado**: Geração automática com base em onboarding, com possibilidade de ajustes manuais.
+- **Registro Inteligente de Refeição**: Confirmação do planejado ou registro alternativo via IA/foto.
+- **Cálculo Automático de Calorias**: Soma diária e semanal, com comparação ao plano.
+- **Acompanhamento de Exercícios**: Registro manual ou automático, resumo semanal, alertas de meta.
+- **Avaliação de Exames**: Registro de resultados e alertas automáticos caso valores estejam fora do ideal.
+- **Feedback em Tempo Real**: Alertas, gráficos, sugestões e notificações baseadas nos dados reais do usuário.
+- **Sincronização e Fallback**: Dados salvos no Supabase, com fallback para localStorage em caso de falha de conexão.
+
+---
+
+## Fluxo Detalhado: Refeições Hoje
+
+### 1. Visualização das Refeições Planejadas
+- Ao acessar "Refeições Hoje", o usuário visualiza as refeições programadas para o dia conforme o plano alimentar.
+- Cada refeição mostra o tipo (café da manhã, almoço, etc.), horário sugerido e alimentos recomendados.
+- O usuário pode clicar em uma refeição para ver detalhes (porções, calorias totais previstas, etc.).
+
+### 2. Processamento de Refeição Alternativa
+- Se o usuário consumir algo diferente do planejado, ele pode registrar a refeição alternativa de duas formas:
+  a) **Via Foto/IA**: O usuário tira uma foto da refeição consumida e submete para análise da IA.
+  b) **Manualmente**: O usuário pode descrever os alimentos consumidos em um formulário.
+
+### 3. Análise por IA
+- A IA processa a foto da refeição e retorna:
+  - Identificação dos alimentos presentes
+  - Cálculo aproximado de calorias
+  - Detalhamento de macronutrientes (proteínas, carboidratos, gorduras)
+  - Sugestões ou alertas (opcional)
+
+### 4. Confirmação e Registro
+- Após a análise, o usuário visualiza os dados calculados pela IA e pode editá-los se necessário.
+- O usuário seleciona qual tipo de refeição está registrando (café da manhã, almoço, etc.).
+- Ao clicar em "Confirmar Registro":
+  - O status da refeição muda para "confirmado" (o botão transforma-se em "Desfazer")
+  - As calorias calculadas são somadas ao total diário
+  - Os dados são salvos na tabela `meal_records`
+  - A tabela `daily_meal_status` é atualizada com status "completed"
+
+### 5. Atualização Imediata da Interface
+- O dashboard nutricional é atualizado imediatamente com as novas calorias
+- Gráficos e métricas de progresso são recalculados
+- O usuário recebe feedback visual da mudança (ex: animação, notificação)
+
+### 6. Desfazer (se necessário)
+- Se o usuário clicar em "Desfazer":
+  - O registro é removido de `meal_records`
+  - O status em `daily_meal_status` volta para "planned"
+  - As calorias são subtraídas do total diário
+
+---
+
+## Fluxo Visual Resumido
+
+Onboarding → Plano Alimentar → Cronograma Diário
+        ↘__________________________↑
+         |                         |
+         ↓                         |
+   Registro de Refeições ← IA/Manual
+         ↓
+   Cálculo de Calorias & Progresso
+         ↓
+   Recomendações de Exercício & Avaliação de Exames
+         ↓
+   Feedback ao Usuário
+
+---
+
+## Detalhes Técnicos e Correções
+
+### Campos Obrigatórios e Compatibilidade
+
+#### meal_records
+- **description**: Campo obrigatório (NOT NULL) na tabela. Não usar "notes" que era usado anteriormente.
+- **meal_type**: Referente ao tipo da refeição (café da manhã, almoço, etc).
+  - **IMPORTANTE**: Existe uma constraint check que restringe os valores permitidos. 
+  - Usar os valores: 'breakfast', 'morning_snack', 'lunch', 'afternoon_snack', 'dinner', 'supper', 'other'.
+  - NÃO USAR os nomes em português como 'Café da manhã', 'Almoço', pois a constraint do Supabase não aceita.
+- **timestamp**: Data/hora da refeição, formato ISO.
+
+#### daily_meal_status
+- **status**: Valores aceitos são 'upcoming', 'planned', 'completed' e 'missed'.
+- **meal_id**: Conexão com o tipo de refeição.
+- **record_id**: Referência opcional a um registro em meal_records.
+
+### Correções Implementadas
+
+1. **Correção de Compatibilidade com Supabase**: 
+   - Mudança de `notes` para `description` nos registros de refeição (erro: "null value in column "description" violates not-null constraint")
+   - Ajuste nas interfaces TypeScript para refletir com precisão o schema do banco
+
+2. **Recuperação de Erros**: 
+   - Valor padrão para campos obrigatórios (ex: `description: description || 'Refeição registrada via app'`)
+   - Logs detalhados para facilitar depuração
+
+3. **Gerenciamento de Estado**:
+   - Fallback automático para localStorage quando necessário
+   - Sincronização de estado entre componentes via eventos
+
+---
+
+## Dicas para Desenvolvedores
+
+- Sempre alinhe os campos do frontend com o schema do Supabase.
+- Use os tipos TypeScript para máxima segurança.
+- Documente novas funcionalidades e mantenha este arquivo atualizado.
+- Antes de criar novos campos/tabelas, pense em como eles se encaixam no fluxo geral.
+
+---
+
+Se precisar de detalhamento de algum fluxo, tabela ou integração, consulte este documento ou peça apoio ao time técnico.

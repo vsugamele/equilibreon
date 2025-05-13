@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
@@ -5,11 +6,10 @@ import { Label } from '@/components/ui/label';
 import { Camera, Calendar, ChevronLeft, ChevronRight, Plus, Trash2, Loader2, Lightbulb, AlertCircle, RefreshCw } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { Badge } from '@/components/ui/badge';
-import { ProgressPhoto } from '@/types/supabase';
+import { ProgressPhoto } from '@/types/progressPhotos'; // Importando da nova localização
 import { uploadProgressPhoto, getProgressPhotos, deleteProgressPhoto, reanalyzePhoto } from '@/services/profilePhotoService';
 import { supabase } from "@/integrations/supabase/client";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { addAlternativeUrls, handleImageError } from '@/utils/imageLoader';
 
 interface AIAnalysis {
   summary?: string;
@@ -42,9 +42,9 @@ const ProfilePhotos = () => {
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
   const [authError, setAuthError] = useState<string | null>(null);
   const [user, setUser] = useState<any>(null);
-  const [deletingPhotoId, setDeletingPhotoId] = useState<string | null>(null);
   const { toast } = useToast();
 
+  // Check authentication status when the component mounts
   // Função para armazenar fotos no localStorage para persistência entre sessões
   const savePhotosToLocalStorage = (photos: ProgressPhoto[]) => {
     try {
@@ -53,15 +53,6 @@ const ProfilePhotos = () => {
     } catch (e) {
       console.error('Erro ao salvar fotos no localStorage:', e);
     }
-  };
-
-  // Função simplificada para lidar com erros de carregamento de imagem
-  const handleImageErrorWrapper = (e: React.SyntheticEvent<HTMLImageElement, Event>, photo: ProgressPhoto) => {
-    // Usar diretamente um placeholder em caso de erro
-    const target = e.target as HTMLImageElement;
-    target.src = 'https://via.placeholder.com/300x400?text=Imagem+Indisponível';
-    target.onerror = null; // Prevenir loop infinito
-    photo.loading_error = true; // Marcar a foto como tendo erro de carregamento
   };
 
   // Função para recuperar fotos do localStorage
@@ -95,10 +86,11 @@ const ProfilePhotos = () => {
           const cachedPhotos = getPhotosFromLocalStorage();
           if (cachedPhotos.length > 0) {
             setPhotos(cachedPhotos);
-            setLoading(false);
+            // Não desativar o loading ainda para permitir que as fotos do servidor sejam carregadas
           }
           
-          // Depois, carregar fotos atualizadas do servidor
+          // Carregar fotos atualizadas do servidor imediatamente
+          console.log('Carregando fotos do servidor...');
           await loadPhotos();
         } else {
           setAuthError("Você precisa estar logado para acessar suas fotos de progresso.");
@@ -114,19 +106,55 @@ const ProfilePhotos = () => {
     checkAuth();
   }, []);
 
-  // Não precisamos mais aplicar URLs alternativas, pois estamos usando uma abordagem direta para erros
-
   const loadPhotos = async () => {
-    if (!user) return;
+    if (!user) {
+      console.log('Não há usuário autenticado para carregar fotos');
+      setLoading(false);
+      return;
+    }
     
+    console.log('Iniciando carregamento de fotos de progresso...');
     setLoading(true);
+    
+    // Definir um timeout para garantir que o loading não fique preso
+    const timeoutId = setTimeout(() => {
+      console.log('Timeout no carregamento de fotos');
+      setLoading(false);
+      toast({
+        title: "Tempo limite excedido",
+        description: "Houve um problema ao carregar as fotos. Tente novamente.",
+        variant: "destructive"
+      });
+    }, 10000); // 10 segundos de timeout
     try {
       const loadedPhotos = await getProgressPhotos();
-      console.log('Fotos carregadas do servidor:', loadedPhotos);
       
-      // Processar fotos para adicionar URLs alternativas e melhorar acesso
-      const processedPhotos = loadedPhotos.map(photo => addAlternativeUrls(photo));
-      console.log('Fotos processadas com URLs alternativas:', processedPhotos);
+      // Corrigir possíveis problemas de URLs inacessíveis
+      const processedPhotos = loadedPhotos.map(photo => {
+        // Verificar se a URL da foto é relativa ou absoluta
+        if (photo.photo_url && !photo.photo_url.startsWith('http')) {
+          // Converter URLs relativas para absolutas se necessário
+          photo.photo_url = `${window.location.origin}/${photo.photo_url}`;
+        }
+        
+        // Adicionar parâmetros de acesso público para URLs do Supabase
+        if (photo.photo_url && photo.photo_url.includes('supabase.co/storage')) {
+          // Adicionar parâmetro para forçar acesso público se ainda não tiver
+          if (!photo.photo_url.includes('?')) {
+            photo.photo_url = `${photo.photo_url}?public=true`;
+          } else if (!photo.photo_url.includes('public=true')) {
+            photo.photo_url = `${photo.photo_url}&public=true`;
+          }
+          
+          // Adicionar timestamp para evitar cache
+          const timestamp = new Date().getTime();
+          photo.photo_url = photo.photo_url.includes('?') 
+            ? `${photo.photo_url}&t=${timestamp}` 
+            : `${photo.photo_url}?t=${timestamp}`;
+        }
+        
+        return photo;
+      });
       
       // Atualizar o estado e o cache local
       setPhotos(processedPhotos);
@@ -165,6 +193,11 @@ const ProfilePhotos = () => {
   // Filtrar e fazer log para debug
   const filteredPhotos = photos.filter(photo => photo.type === selectedType);
   const currentPhoto = filteredPhotos[currentPhotoIndex];
+  
+  console.log('Todas as fotos:', photos);
+  console.log('Fotos filtradas:', filteredPhotos);
+  console.log('Foto atual:', currentPhoto, 'Índice:', currentPhotoIndex);
+  console.log('Tipo selecionado:', selectedType);
 
   const handlePrevPhoto = () => {
     if (currentPhotoIndex > 0) {
@@ -197,12 +230,9 @@ const ProfilePhotos = () => {
         console.log('Nova foto carregada:', newPhoto);
         
         if (newPhoto) {
-          // Adicionar URLs alternativas à nova foto
-          const processedNewPhoto = addAlternativeUrls(newPhoto);
-          
           // Atualiza o array de fotos local e força um refresh da linha do tempo
           setPhotos(prev => {
-            const updatedPhotos = [processedNewPhoto, ...prev];
+            const updatedPhotos = [newPhoto, ...prev];
             console.log('Fotos atualizadas:', updatedPhotos);
             return updatedPhotos;
           });
@@ -211,53 +241,18 @@ const ProfilePhotos = () => {
           setCurrentPhotoIndex(0);
           
           // Força um recarregamento completo das fotos do banco de dados
-          // para garantir que a linha do tempo seja atualizada
-          await loadPhotos();
-          
-          // Garantir que o tipo corresponda à foto carregada
-          setSelectedType(newPhoto.type as 'front' | 'side' | 'back');
-          
-          toast({
-            title: "Foto adicionada",
-            description: "Sua foto de progresso foi adicionada com sucesso!",
-            variant: "default",
-          });
-        } else {
-          throw new Error('Falha ao fazer upload da foto');
-        }
-      } catch (error) {
-        console.error('Error uploading photo:', error);
-        toast({
-          title: "Erro no upload",
-          description: "Não foi possível fazer o upload da sua foto. Tente novamente.",
-          variant: "destructive",
-        });
-      } finally {
-        setUploading(false);
-        // Limpar o input do arquivo para permitir uploads repetidos do mesmo arquivo
-        if (event.target) {
-          event.target.value = '';
-        }
-      }
     }
   };
 
   const handleDeletePhoto = async (id: string) => {
-    console.log('Tentando excluir foto com ID:', id);
-    setLoading(true);
+    if (!window.confirm('Tem certeza que deseja excluir esta foto?')) return;
     
     try {
-      console.log('Chamando deleteProgressPhoto para o ID:', id);
       const success = await deleteProgressPhoto(id);
-      
       if (success) {
-        console.log('Exclusão bem-sucedida, atualizando lista de fotos');
-        // Atualiza o estado removendo a foto excluída
         const updatedPhotos = photos.filter(photo => photo.id !== id);
         setPhotos(updatedPhotos);
         savePhotosToLocalStorage(updatedPhotos);
-        
-        // Mostrar notificação de sucesso
         toast({
           title: "Foto excluída",
           description: "A foto foi excluída com sucesso.",
@@ -268,14 +263,10 @@ const ProfilePhotos = () => {
         if (currentPhotoIndex >= filteredPhotos.length) {
           setCurrentPhotoIndex(Math.max(0, filteredPhotos.length - 1));
         }
-        
-        // Recarregar fotos do servidor para garantir sincronização
-        await loadPhotos();
       } else {
-        console.error('Falha ao excluir foto');
         toast({
           title: "Erro",
-          description: "Não foi possível excluir a foto. Por favor, tente novamente.",
+          description: "Não foi possível excluir a foto.",
           variant: "destructive",
         });
       }
@@ -283,11 +274,9 @@ const ProfilePhotos = () => {
       console.error('Erro ao excluir foto:', error);
       toast({
         title: "Erro",
-        description: "Ocorreu um erro ao tentar excluir a foto.",
+        description: "Ocorreu um erro ao excluir a foto.",
         variant: "destructive",
       });
-    } finally {
-      setLoading(false);
     }
   };
   
@@ -305,12 +294,9 @@ const ProfilePhotos = () => {
       const updatedPhoto = await reanalyzePhoto(photoId);
       
       if (updatedPhoto) {
-        // Adicionar URLs alternativas à foto atualizada
-        const processedUpdatedPhoto = addAlternativeUrls(updatedPhoto);
-        
         // Atualizar a foto na lista
         const updatedPhotos = photos.map(photo => 
-          photo.id === photoId ? processedUpdatedPhoto : photo
+          photo.id === photoId ? updatedPhoto : photo
         );
         
         setPhotos(updatedPhotos);
@@ -476,7 +462,7 @@ const ProfilePhotos = () => {
                   </div>
                 )}
                 
-                {analysis.nutritionSuggestions.focusAreas && analysis.nutritionSuggestions.focusAreas.length > 0 && (
+                {analysis.nutritionSuggestions.focusAreas.length > 0 && (
                   <div className="mt-2">
                     <span className="text-sm font-medium text-amber-700 dark:text-amber-300">Áreas de Foco:</span>
                     <div className="flex flex-wrap gap-1 mt-1">
@@ -546,223 +532,335 @@ const ProfilePhotos = () => {
     );
   };
 
+  if (authError) {
+    return (
+      <div className="space-y-4">
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Erro de autenticação</AlertTitle>
+          <AlertDescription>{authError}</AlertDescription>
+        </Alert>
+        <p className="text-center text-slate-600 dark:text-slate-400">
+          Por favor, faça login para visualizar e gerenciar suas fotos de progresso.
+        </p>
+        <div className="flex justify-center">
+          <Button 
+            onClick={() => window.location.href = '/login'}
+            className="bg-indigo-600 hover:bg-indigo-700"
+          >
+            Fazer Login
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
-      <div className="bg-white rounded-lg shadow-md p-4">
-        <Card>
-          <CardHeader>
-            <CardTitle>Fotos de Progresso</CardTitle>
+    <div className="space-y-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        <Card className="flex flex-col">
+          <CardHeader className="pb-3">
+            <CardTitle>Suas Fotos de Progresso</CardTitle>
             <CardDescription>
-              Acompanhe sua evolução com fotos de progresso
+              Compare sua evolução ao longo do tempo
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            {authError ? (
-              <Alert variant="destructive">
-                <AlertCircle className="h-4 w-4" />
-                <AlertTitle>Erro de Autenticação</AlertTitle>
-                <AlertDescription>{authError}</AlertDescription>
-              </Alert>
-            ) : loading ? (
-              <div className="flex justify-center items-center py-12">
-                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                <span className="ml-2 text-muted-foreground">Carregando fotos...</span>
+          <CardContent className="flex-grow flex flex-col">
+            <div className="flex justify-center mb-4">
+              <div className="flex gap-2">
+                <Button 
+                  variant={selectedType === 'front' ? 'default' : 'outline'} 
+                  className={selectedType === 'front' ? 'bg-indigo-600 hover:bg-indigo-700' : ''}
+                  onClick={() => {setSelectedType('front'); setCurrentPhotoIndex(0);}}
+                >
+                  Frontal
+                </Button>
+                <Button 
+                  variant={selectedType === 'side' ? 'default' : 'outline'} 
+                  className={selectedType === 'side' ? 'bg-indigo-600 hover:bg-indigo-700' : ''}
+                  onClick={() => {setSelectedType('side'); setCurrentPhotoIndex(0);}}
+                >
+                  Lateral
+                </Button>
+                <Button 
+                  variant={selectedType === 'back' ? 'default' : 'outline'} 
+                  className={selectedType === 'back' ? 'bg-indigo-600 hover:bg-indigo-700' : ''}
+                  onClick={() => {setSelectedType('back'); setCurrentPhotoIndex(0);}}
+                >
+                  Posterior
+                </Button>
               </div>
-            ) : (
-              <div>
-                <div className="flex space-x-4 mb-4">
+            </div>
+
+            <div className="relative flex-grow flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-800 rounded-lg min-h-80">
+              {loading ? (
+                <div className="flex flex-col items-center justify-center">
+                  <Loader2 className="h-8 w-8 text-indigo-500 animate-spin mb-2" />
+                  <p className="text-slate-500 dark:text-slate-400">Carregando fotos...</p>
+                </div>
+              ) : filteredPhotos.length > 0 && currentPhoto ? (
+                <>
+                  {/* Tentar mostrar a imagem com tratamento de erro */}
+                  {currentPhoto.photo_url ? (
+                    <img 
+                      src={currentPhoto.photo_url} 
+                      alt={`${selectedType} view`} 
+                      className="max-h-80 object-contain"
+                      onError={(e) => {
+                        console.error('Erro ao carregar imagem:', currentPhoto.photo_url);
+                        const target = e.target as HTMLImageElement;
+                        
+                        // Verificar se há URLs alternativas disponíveis
+                        if (currentPhoto.photo_url_alternatives && currentPhoto.photo_url_alternatives.length > 0) {
+                          // Tentar a próxima URL alternativa
+                          const currentIndex = currentPhoto.photo_url_alternatives.indexOf(target.src);
+                          const nextIndex = currentIndex === -1 ? 0 : currentIndex + 1;
+                          
+                          if (nextIndex < currentPhoto.photo_url_alternatives.length) {
+                            console.log(`Tentando URL alternativa ${nextIndex + 1}/${currentPhoto.photo_url_alternatives.length} para imagem principal`);
+                            target.src = currentPhoto.photo_url_alternatives[nextIndex];
+                            return;
+                          }
+                        }
+                        
+                        // Se não há alternativas ou todas falharam, tentar uma última vez com timestamp
+                        if (currentPhoto.photo_url && !target.src.includes('t=')) {
+                          // Adicionar parâmetros de acesso público
+                          let altUrl = target.src;
+                          
+                          // Adicionar parâmetro para forçar acesso público se ainda não tiver
+                          if (!altUrl.includes('?')) {
+                            altUrl = `${altUrl}?public=true`;
+                          } else if (!altUrl.includes('public=true')) {
+                            altUrl = `${altUrl}&public=true`;
+                          }
+                          
+                          // Adicionar timestamp para evitar cache
+                          const timestamp = new Date().getTime();
+                          altUrl = altUrl.includes('?') 
+                            ? `${altUrl}&t=${timestamp}` 
+                            : `${altUrl}?t=${timestamp}`;
+                          
+                          console.log('Tentando URL final com parâmetros:', altUrl);
+                          target.src = altUrl;
+                          
+                          // Se ainda falhar, usar placeholder
+                          target.onerror = () => {
+                            target.onerror = null;
+                            target.src = 'https://via.placeholder.com/400x500?text=Imagem+Indisponível';
+                            if (currentPhoto) currentPhoto.loading_error = true;
+                          };
+                        } else {
+                          target.onerror = null; // Evitar loop infinito
+                          target.src = 'https://via.placeholder.com/400x500?text=Imagem+Indisponível';
+                          if (currentPhoto) currentPhoto.loading_error = true;
+                        }
+                      }}
+                    />
+                  ) : (
+                    <div className="flex flex-col items-center justify-center p-8">
+                      <p className="text-red-500 mb-2">URL da imagem não disponível</p>
+                      <p className="text-sm text-slate-500">ID da foto: {currentPhoto.id}</p>
+                    </div>
+                  )}
+                  <div className="absolute bottom-2 left-2 bg-black/50 text-white px-2 py-1 rounded text-xs flex items-center">
+                    <Calendar className="h-3 w-3 mr-1" />
+                    {formatDate(currentPhoto.created_at)}
+                  </div>
                   <Button
-                    variant={selectedType === 'front' ? 'default' : 'outline'}
-                    onClick={() => {
-                      setSelectedType('front');
-                      setCurrentPhotoIndex(0);
-                    }}
+                    variant="destructive"
+                    size="sm"
+                    className="absolute top-2 right-2 opacity-80 hover:opacity-100"
+                    onClick={() => handleDeletePhoto(currentPhoto.id)}
                   >
-                    Frente
+                    <Trash2 className="h-4 w-4" />
                   </Button>
+                </>
+              ) : (
+                <div className="text-center p-6">
+                  <p className="text-slate-500 dark:text-slate-400 mb-3">Nenhuma foto disponível</p>
+                  <label htmlFor="add-photo" className="cursor-pointer">
+                    <div className="flex flex-col items-center justify-center p-4 border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
+                      <Camera className="h-8 w-8 text-slate-400 mb-2" />
+                      <span className="text-sm text-slate-500 dark:text-slate-400">Adicionar foto</span>
+                      <input
+                        id="add-photo"
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handlePhotoUpload}
+                        disabled={uploading}
+                      />
+                    </div>
+                  </label>
+                </div>
+              )}
+
+              {filteredPhotos.length > 1 && (
+                <div className="absolute inset-x-0 top-1/2 flex justify-between px-2 transform -translate-y-1/2 pointer-events-none">
                   <Button
-                    variant={selectedType === 'side' ? 'default' : 'outline'}
-                    onClick={() => {
-                      setSelectedType('side');
-                      setCurrentPhotoIndex(0);
-                    }}
+                    size="sm"
+                    variant="outline"
+                    className="bg-white/70 hover:bg-white dark:bg-slate-800/70 dark:hover:bg-slate-800 rounded-full h-8 w-8 p-0 pointer-events-auto"
+                    onClick={handlePrevPhoto}
+                    disabled={currentPhotoIndex === 0}
                   >
-                    Lateral
-                  </Button>
-                  <Button
-                    variant={selectedType === 'back' ? 'default' : 'outline'}
-                    onClick={() => {
-                      setSelectedType('back');
-                      setCurrentPhotoIndex(0);
-                    }}
-                  >
-                    Costas
                   </Button>
                 </div>
+              )}
+            </div>
 
-                {filteredPhotos.length > 0 ? (
-                  <div>
-                    <div className="flex items-center justify-between mb-4">
-                      <Button variant="ghost" size="icon" onClick={handlePrevPhoto} disabled={currentPhotoIndex === 0}>
-                        <ChevronLeft className="h-5 w-5" />
-                      </Button>
-                      <div className="flex overflow-x-auto gap-2 py-2 px-4 max-w-[80%]">
-                        {filteredPhotos.map((photo, index) => (
-                          <div 
-                            key={photo.id} 
-                            className={`relative cursor-pointer ${index === currentPhotoIndex ? 'ring-2 ring-blue-500' : ''}`}
-                            onClick={() => setCurrentPhotoIndex(index)}
-                          >
-                            <div className="w-16 h-20 overflow-hidden rounded-md">
-                              <img 
-                                src={photo.photo_url} 
-                                alt="" 
-                                className="aspect-[3/4] object-cover" 
-                                onError={(e) => handleImageErrorWrapper(e, photo)}
-                              />
-                            </div>
-                            <div className="absolute bottom-0 right-0">
-                              <Button 
-                                variant="ghost" 
-                                size="icon" 
-                                className="h-6 w-6 bg-white/80 hover:bg-white rounded-full p-1"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleReanalyzePhoto(photo.id);
-                                }}
-                              >
-                                <RefreshCw className="h-3 w-3" />
-                              </Button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                      <Button variant="ghost" size="icon" onClick={handleNextPhoto} disabled={currentPhotoIndex === filteredPhotos.length - 1}>
-                        <ChevronRight className="h-5 w-5" />
-                      </Button>
-                    </div>
-                    <div className="flex justify-center">
-                      {currentPhoto ? (
-                        <div className="w-full flex justify-center">
-                          <img
-                            src={`${supabase.storage.from('progress_photos').getPublicUrl(`${user?.id}/${currentPhoto.photo_url.split('/').pop()}`).data.publicUrl}?t=${Date.now()}`}
-                            alt={`Foto de progresso ${currentPhoto.type}`}
-                            className="w-full max-h-96 object-contain"
-                            onError={(e) => {
-                              console.log('Erro ao carregar imagem, tentando abordagem direta');
-                              const img = e.target as HTMLImageElement;
-                              img.src = 'https://via.placeholder.com/300x400?text=Imagem+Indisponível';
-                              img.onerror = null;
-                            }}
-                          />
-                        </div>
-                      ) : (
-                        <div className="w-full h-64 flex items-center justify-center bg-gray-100 dark:bg-gray-900 rounded-md">
-                          <p className="text-gray-500">Sem fotos para exibir</p>
-                        </div>
-                      )}
-                    </div>
-                    
-                    {/* Informações da foto */}
-                    <div className="mt-4 flex justify-between items-center">
-                      <div>
-                        <p className="text-sm text-gray-500">
-                          <Calendar className="inline-block h-4 w-4 mr-1" />
-                          {formatDate(currentPhoto.created_at)}
-                        </p>
-                        {currentPhoto.notes && (
-                          <p className="text-sm mt-1">{currentPhoto.notes}</p>
-                        )}
-                      </div>
-                      {/* Botões de ação */}
-                      <div className="flex space-x-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="text-blue-500 border-blue-300 hover:bg-blue-50 hover:text-blue-600"
-                          onClick={() => handleReanalyzePhoto(currentPhoto.id)}
-                        >
-                          <RefreshCw className="h-4 w-4 mr-1" />
-                          Reanalisar
-                        </Button>
-                        
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="text-red-500 border-red-300 hover:bg-red-50 hover:text-red-600"
-                          onClick={() => {
-                            // Em vez de usar window.confirm, configura o ID da foto a ser excluída
-                            setDeletingPhotoId(currentPhoto.id);
-                            // Em seguida, chama diretamente handleDeletePhoto com o ID
-                            handleDeletePhoto(currentPhoto.id);
-                          }}
-                        >
-                          <Trash2 className="h-4 w-4 mr-1" />
-                          Excluir
-                        </Button>
-                      </div>
-                    </div>
-                    
-                    {/* Análise de IA */}
-                    {renderAIAnalysis()}
-                  </div>
-                ) : (
-                  <div className="flex justify-center">
-                    <p>Nenhuma foto encontrada.</p>
+            {currentPhoto && (
+              <div className="space-y-3 mt-3">
+                {currentPhoto.notes && (
+                  <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg text-sm">
+                    <Label className="block mb-1 text-xs text-slate-500 dark:text-slate-400">Notas:</Label>
+                    <p className="text-slate-700 dark:text-slate-300">{currentPhoto.notes}</p>
                   </div>
                 )}
                 
-                {/* Timeline de fotos */}
-                <div className="mt-8">
-                  <h3 className="text-lg font-medium mb-4">Linha do Tempo</h3>
-                  <div className="space-y-6">
-                    {Object.entries(groupPhotosByDate()).map(([dateKey, photos]) => {
+                {renderAIAnalysis()}
+              </div>
+            )}
+          </CardContent>
+          <CardFooter className="pt-3 border-t dark:border-slate-700">
+            <label htmlFor="new-photo" className="w-full">
+              <Button 
+                className="w-full flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700" 
+                asChild
+                disabled={uploading}
+              >
+                <div>
+                  {uploading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Enviando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="h-4 w-4" />
+                      <span>Adicionar nova foto</span>
+                    </>
+                  )}
+                  <input
+                    id="new-photo"
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handlePhotoUpload}
+                    disabled={uploading}
+                  />
+                </div>
+              </Button>
+            </label>
+          </CardFooter>
+        </Card>
+        
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle>Linha do Tempo</CardTitle>
+            <CardDescription>
+              Visualize seu progresso ao longo do tempo
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {loading ? (
+              <div className="flex flex-col items-center justify-center py-10">
+                <Loader2 className="h-8 w-8 text-indigo-500 animate-spin mb-2" />
+                <p className="text-slate-500 dark:text-slate-400">Carregando linha do tempo...</p>
+              </div>
+            ) : (
+              <div className="space-y-4 max-h-96 overflow-y-auto pr-2">
+                {photos.length === 0 ? (
+                  <p className="text-center text-slate-500 dark:text-slate-400 py-8">
+                    Nenhuma foto de progresso encontrada
+                  </p>
+                ) : (
+                  Object.entries(groupPhotosByDate())
+                    .sort((a, b) => b[0].localeCompare(a[0])) // Sort by date, newest first
+                    .map(([dateKey, datePhotos]) => {
                       const [year, month] = dateKey.split('-').map(Number);
-                      const date = new Date(year, month);
-                      const formattedDate = date.toLocaleDateString('pt-BR', { year: 'numeric', month: 'long' });
+                      const date = new Date(year, month, 1);
+                      const monthName = date.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
                       
                       return (
-                        <div key={dateKey}>
-                          <h4 className="text-md font-medium mb-2">{formattedDate}</h4>
-                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                            {photos.map(photo => (
-                              <div key={photo.id} className="relative">
-                                <div 
-                                  className="aspect-[3/4] rounded-md overflow-hidden cursor-pointer"
-                                  onClick={() => {
-                                    setSelectedType(photo.type as 'front' | 'side' | 'back');
-                                    const newIndex = filteredPhotos.findIndex(p => p.id === photo.id);
-                                    if (newIndex !== -1) {
-                                      setCurrentPhotoIndex(newIndex);
+                        <div key={dateKey} className="border-l-2 border-indigo-200 dark:border-indigo-800 pl-4 pb-2">
+                          <h3 className="font-medium text-indigo-700 dark:text-indigo-400 mb-2">{monthName}</h3>
+                          <div className="grid grid-cols-3 gap-2">
+                            {datePhotos.map(photo => (
+                              <div 
+                                key={photo.id} 
+                                className={`relative cursor-pointer rounded-md overflow-hidden border-2 transition-all ${
+                                  currentPhoto && currentPhoto.id === photo.id 
+                                    ? 'border-indigo-500 ring-2 ring-indigo-300 dark:ring-indigo-700' 
+                                    : 'border-transparent hover:border-indigo-300 dark:hover:border-indigo-700'
+                                }`}
+                                onClick={() => {
+                                  setSelectedType(photo.type as 'front' | 'side' | 'back');
+                                  const typePhotos = photos.filter(p => p.type === photo.type);
+                                  const photoIndex = typePhotos.findIndex(p => p.id === photo.id);
+                                  if (photoIndex !== -1) {
+                                    setCurrentPhotoIndex(photoIndex);
+                                  }
+                                }}
+                              >
+                                <img 
+                                  src={photo.photo_url} 
+                                  alt="" 
+                                  className="aspect-[3/4] object-cover" 
+                                  onError={(e) => {
+                                    console.error('Erro ao carregar imagem:', photo.photo_url);
+                                    const target = e.target as HTMLImageElement;
+                                    
+                                    // Verificar se há URLs alternativas disponíveis
+                                    if (photo.photo_url_alternatives && photo.photo_url_alternatives.length > 0) {
+                                      // Tentar a próxima URL alternativa
+                                      const currentIndex = photo.photo_url_alternatives.indexOf(target.src);
+                                      const nextIndex = currentIndex === -1 ? 0 : currentIndex + 1;
+                                      
+                                      if (nextIndex < photo.photo_url_alternatives.length) {
+                                        console.log(`Tentando URL alternativa ${nextIndex + 1}/${photo.photo_url_alternatives.length}`);
+                                        target.src = photo.photo_url_alternatives[nextIndex];
+                                        return;
+                                      }
+                                    }
+                                    
+                                    // Se não há alternativas ou todas falharam, tentar uma última vez com timestamp
+                                    if (!target.src.includes('t=')) {
+                                      const timestamp = new Date().getTime();
+                                      const newUrl = target.src.includes('?') 
+                                        ? `${target.src}&t=${timestamp}` 
+                                        : `${target.src}?t=${timestamp}`;
+                                      target.src = newUrl;
+                                    } else {
+                                      // Se ainda falhar, usar placeholder
+                                      target.src = 'https://via.placeholder.com/300x400?text=Imagem+Indisponível';
+                                      target.onerror = null; // Prevenir loop infinito
+                                      photo.loading_error = true; // Marcar a foto como tendo erro de carregamento
                                     }
                                   }}
-                                >
-                                  <img 
-                                    src={`${supabase.storage.from('progress_photos').getPublicUrl(`${user?.id}/${photo.photo_url.split('/').pop()}`).data.publicUrl}?t=${Date.now()}`} 
-                                    alt={`${photo.type} view`} 
-                                    className="w-full h-full object-cover"
-                                    onError={(e) => {
-                                      const img = e.target as HTMLImageElement;
-                                      console.log(`Erro ao carregar imagem: ${img.src}`);
-                                      img.src = 'https://via.placeholder.com/150x200?text=Foto+indisponível';
-                                      img.onerror = null;
-                                    }}
-                                  />
+                                />
+                                <div className="absolute bottom-0 inset-x-0 bg-black/60 px-2 py-1">
+                                  <span className="text-white text-xs capitalize">{photo.type}</span>
                                 </div>
-                                <div className="absolute top-2 right-2">
-                                  <Badge variant="secondary" className="text-xs">
-                                    {photo.type}
-                                  </Badge>
-                                </div>
-                                <div className="absolute bottom-2 right-2">
-                                  <Button 
-                                    variant="ghost" 
-                                    size="icon" 
-                                    className="h-6 w-6 bg-white/80 hover:bg-white rounded-full p-1"
+                                <div className="absolute top-1 right-1 flex gap-1">
+                                  {photo.ai_analysis && (
+                                    <Badge 
+                                      variant="secondary" 
+                                      className="bg-amber-500/70 text-white text-[10px] px-1 py-0 rounded-sm"
+                                    >
+                                      AI
+                                    </Badge>
+                                  )}
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-5 w-5 bg-white/80 hover:bg-white text-slate-700 rounded-full p-0.5"
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       handleReanalyzePhoto(photo.id);
                                     }}
+                                    disabled={analyzing}
                                   >
                                     <RefreshCw className="h-3 w-3" />
                                   </Button>
@@ -772,38 +870,14 @@ const ProfilePhotos = () => {
                           </div>
                         </div>
                       );
-                    })}
-                  </div>
-                </div>
+                    })
+                )}
               </div>
             )}
           </CardContent>
-          <CardFooter>
-            <div className="w-full">
-              <Label htmlFor="photo-upload" className="cursor-pointer">
-                <div className="flex items-center justify-center w-full p-3 border-2 border-dashed rounded-md border-gray-300 hover:border-gray-400 transition-colors">
-                  {uploading ? (
-                    <div className="flex items-center">
-                      <Loader2 className="h-5 w-5 animate-spin mr-2" />
-                      <span>Enviando...</span>
-                    </div>
-                  ) : (
-                    <div className="flex items-center">
-                      <Camera className="h-5 w-5 mr-2" />
-                      <span>Adicionar nova foto de {selectedType === 'front' ? 'frente' : selectedType === 'side' ? 'lateral' : 'costas'}</span>
-                    </div>
-                  )}
-                </div>
-                <input
-                  id="photo-upload"
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={handlePhotoUpload}
-                  disabled={uploading}
-                />
-              </Label>
-            </div>
+          <CardFooter className="flex justify-between border-t dark:border-slate-700 pt-4">
+            <Button variant="outline">Exportar Relatório</Button>
+            <Button variant="outline">Compartilhar Progresso</Button>
           </CardFooter>
         </Card>
       </div>

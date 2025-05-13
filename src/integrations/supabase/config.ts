@@ -6,6 +6,6 @@ export const supabaseConfig = {
 
 // Configuração da API OpenAI
 export const openaiConfig = {
-  // Usar variável de ambiente ou uma chave temporária para desenvolvimento
-  apiKey: import.meta.env.VITE_OPENAI_API_KEY || ''
+  // Usando a chave de API fornecida diretamente
+  apiKey: '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'
 };
