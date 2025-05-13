@@ -1,10 +1,12 @@
 
 import { supabase } from "@/integrations/supabase/client";
-import { MealRecordType } from "@/types/supabase";
+import { MealRecordType, MealRecordInsert } from "@/types/supabase-types";
 
 // Função para salvar um registro de refeição
-export const saveMealRecord = async (mealData: Omit<MealRecordType, 'id' | 'timestamp'>): Promise<MealRecordType | null> => {
+export const saveMealRecord = async (mealData: MealRecordInsert): Promise<{ success: boolean; data?: MealRecordType; error?: any }> => {
   try {
+    console.log('Enviando dados para Supabase:', mealData);
+    
     const { data, error } = await supabase
       .from('meal_records')
       .insert(mealData)
@@ -13,13 +15,13 @@ export const saveMealRecord = async (mealData: Omit<MealRecordType, 'id' | 'time
       
     if (error) {
       console.error('Erro ao salvar registro de refeição:', error);
-      throw error;
+      return { success: false, error };
     }
     
-    return data as MealRecordType;
+    return { success: true, data: data as MealRecordType };
   } catch (error) {
     console.error('Erro no serviço de registro de refeição:', error);
-    throw error;
+    return { success: false, error };
   }
 };
 

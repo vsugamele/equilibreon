@@ -1367,54 +1367,7 @@ export type Database = {
       }
       roulette_spins: {
         Row: {
-          claimed: boolean | null
-          claimed_at: string | null
-          created_at: string | null
-          id: string
-          points_spent: number
-          prize_id: string
-          user_id: string
-        }
-        Insert: {
-          claimed?: boolean | null
-          claimed_at?: string | null
-          created_at?: string | null
-          id?: string
-          points_spent?: number
-          prize_id: string
-          user_id: string
-        }
-        Update: {
-          claimed?: boolean | null
-          claimed_at?: string | null
-          created_at?: string | null
-          id?: string
-          points_spent?: number
-          prize_id?: string
-          user_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "roulette_spins_prize_id_fkey"
-            columns: ["prize_id"]
-            isOneToOne: false
-            referencedRelation: "roulette_prizes"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "roulette_spins_user_id_fkey"
-            columns: ["user_id"]
-            isOneToOne: false
-            referencedRelation: "admin_users"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "roulette_spins_user_id_fkey"
-            columns: ["user_id"]
-            isOneToOne: false
-            referencedRelation: "admin_users_view"
-            referencedColumns: ["id"]
-          },
+          user_social_missions: {
           {
             foreignKeyName: "roulette_spins_user_id_fkey"
             columns: ["user_id"]

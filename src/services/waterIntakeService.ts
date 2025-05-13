@@ -56,21 +56,27 @@ export function glassesToMl(glasses: number): number {
 }
 
 /**
- * Obter a data atual no formato YYYY-MM-DD
+ * Obter a data atual no formato YYYY-MM-DD com fuso horário de Brasília (GMT-3)
  */
 export const getCurrentDate = (): string => {
-  // Usar data e hora local explícitas para evitar problemas com fuso horário
+  // Obter a data e hora atual
   const now = new Date();
   
-  // Imprimir no console para debug
-  console.log('Data e hora atual:', now.toString());
+  // Ajustar para o fuso horário de Brasília (GMT-3)
+  // Mesmo quando o navegador está em outro fuso horário, isso garantirá que
+  // usamos a data correta para o Brasil
+  const brazilTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
   
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
+  // Imprimir no console para debug
+  console.log('Data e hora atual (local):', now.toString());
+  console.log('Data e hora no Brasil:', brazilTime.toString());
+  
+  const year = brazilTime.getFullYear();
+  const month = String(brazilTime.getMonth() + 1).padStart(2, '0');
+  const day = String(brazilTime.getDate()).padStart(2, '0');
   
   const formattedDate = `${year}-${month}-${day}`;
-  console.log('Data formatada:', formattedDate);
+  console.log('Data formatada (Brasília):', formattedDate);
   
   return formattedDate;
 };

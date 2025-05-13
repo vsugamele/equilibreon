@@ -1,5 +1,13 @@
 
 export interface MealPlanFormData {
+  // Step 0: Hábitos Alimentares e de Exercício
+  mealSchedule?: string;
+  mealQuantities?: string;
+  waterIntake?: string;
+  supplements?: string;
+  exerciseSchedule?: string;
+  generalNotes?: string;
+
   // Step 1: Metabolismo e Percepção
   metabolism: string;
   weightGain: string;

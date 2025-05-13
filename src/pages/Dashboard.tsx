@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Navbar from '@/components/layout/Navbar';
 import Footer from '@/components/layout/Footer';
 import MobileNavbar from '@/components/layout/MobileNavbar';
-import { BarChart, Brain, CalendarDays, Clock, Dna, Heart, LineChart, MessageSquare, UserIcon, Camera, FileText, Pill, Dumbbell, Utensils, CalendarClock, MessageCircle, Droplet, Trophy, RefreshCw } from 'lucide-react';
+import { BarChart, Brain, CalendarDays, Clock, Dna, Heart, LineChart, MessageSquare, UserIcon, Camera, FileText, Pill, Dumbbell, Utensils, CalendarClock, MessageCircle, Droplet, Trophy, RefreshCw, Upload } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import CalorieAnalyzer from '@/components/nutrition/CalorieAnalyzer';
 import ExerciseTracker from '@/components/exercise/ExerciseTracker';
@@ -11,8 +11,9 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTr
 import { Button } from "@/components/ui/button";
 import { scheduleNotifications } from '@/services/notificationService';
 import { toast } from 'sonner';
+import MealInfoSimple from '@/components/nutrition/MealInfoModal';
 import ProgressSummary from '@/components/progress/ProgressSummary';
-import MealInfoModal from '@/components/nutrition/MealInfoModal';
+
 interface MealDetailsType {
   id: number;
   name: string;
@@ -40,11 +41,18 @@ import { supabase } from '@/integrations/supabase/client';
 import ExerciseGoalTracker from '@/components/dashboard/ExerciseGoalTracker';
 import SupplementationTracker from '@/components/dashboard/SupplementationTracker';
 import NutritionistScheduler from '@/components/appointments/NutritionistScheduler';
-import WaterIntakeTracker from '@/components/water/WaterIntakeTracker';
+import WaterIntakeTracker from '@/components/nutrition/WaterIntakeTracker';
+import WaterIntakeHistory from '@/components/nutrition/WaterIntakeHistory';
 import CalorieTracker2 from '@/components/nutrition/CalorieTracker2';
 import MealTracker from '@/components/nutrition/MealTracker';
+import { checkAndResetDailyMeals, backupDailyData } from '@/services/dailyResetService';
+import { generateDailySummary } from '@/services/nutritionSummaryService';
+import { initializeMealReminders } from '@/services/mealReminderService';
+import Banner from '@/components/common/Banner';
+
 
 const Dashboard = () => {
+
   const [currentDate] = useState(new Date());
   const [userName, setUserName] = useState<string>("");
   // const {
@@ -54,6 +62,7 @@ const Dashboard = () => {
   const isMobile = useIsMobile();
   
   // Função para buscar o perfil do usuário e obter o nome real
+  // e também inicializar o sistema de rastreamento diário
   useEffect(() => {
     const fetchUserProfile = async () => {
       try {
@@ -78,6 +87,27 @@ const Dashboard = () => {
         
         // Verificar nome do usuário nas várias fontes possíveis
         let userFullName = '';
+        
+        // Inicializar o sistema de refeições para o dia (reset automático)
+        if (data && user) {
+          try {
+            const userId = user.id;
+            
+            // Fazer backup e gerar resumo de ontem, se houver
+            await backupDailyData(userId);
+            
+            // Gerar resumo de ontem para análises
+            const yesterday = new Date();
+            yesterday.setDate(yesterday.getDate() - 1);
+            const yesterdayStr = yesterday.toISOString().split('T')[0];
+            await generateDailySummary(userId, yesterdayStr);
+            
+            // Note: Vamos verificar se precisa fazer reset para o novo dia *depois* 
+            // de ter definido as refeições padrão mais abaixo no código
+          } catch (error) {
+            console.error('Erro ao inicializar sistema diário:', error);
+          }
+        }
         
         // Primeiro verificar no name do perfil principal
         if (data.name) {
@@ -180,13 +210,80 @@ const Dashboard = () => {
     weekProgress: [70, 80, 75, 85, 90, 85, 75]
   };
 
+  // Adicionar listeners para atualizações de status de refeições
   useEffect(() => {
-    const cleanupNotifications = scheduleNotifications(userData, 5);
+    // Handler para o evento meal-completed vindo do MealAnalysisDialog
+    const handleMealCompleted = (event: CustomEvent) => {
+      const { mealId, status } = event.detail;
+      console.log(`Dashboard: Evento meal-completed recebido para refeição ${mealId}, status: ${status}`);
+      
+      // Atualizar o status da refeição no estado local
+      const updatedMeals = todaysMeals.map(meal => {
+        if (meal.id === mealId) {
+          return { ...meal, completed: true };
+        }
+        return meal;
+      });
+      setTodaysMeals(updatedMeals);
+      
+      // Mostrar notificação de sucesso
+      toast.success('Refeição registrada com sucesso!', {
+        description: 'As calorias foram adicionadas ao seu diário.',
+      });
+    };
+    
+    // Handler para o evento meal-confirmation-update vindo do MealInfoModal
+    const handleMealConfirmationUpdate = (event: CustomEvent) => {
+      const { mealId, status } = event.detail;
+      console.log(`Dashboard: Evento meal-confirmation-update recebido para refeição ${mealId}, status: ${status}`);
+      
+      // Atualizar o status da refeição no estado local
+      const updatedMeals = todaysMeals.map(meal => {
+        if (meal.id === mealId) {
+          return { ...meal, completed: true, status: 'completed' };
+        }
+        return meal;
+      });
+      setTodaysMeals(updatedMeals);
+      console.log('Estado das refeições atualizado:', updatedMeals);
+    };
+    
+    // Registrar os listeners
+    window.addEventListener('meal-completed', handleMealCompleted as EventListener);
+    window.addEventListener('meal-confirmation-update', handleMealConfirmationUpdate as EventListener);
+    
+    // Cleanup
+    return () => {
+      window.removeEventListener('meal-completed', handleMealCompleted as EventListener);
+      window.removeEventListener('meal-confirmation-update', handleMealConfirmationUpdate as EventListener);
+    };
+  }, [todaysMeals]);
+
+  useEffect(() => {
+    // Usa dados do usuário local (já definido acima no componente)
+    const user = {
+      name: userName || "Usuário",
+      streak: 7,
+      waterGoal: 8,
+      waterCurrent: 5
+    };
+    const cleanupNotifications = scheduleNotifications(user, 5);
     return () => {
       cleanupNotifications();
     };
-  }, []);
+  }, [userName]);
   
+  // Função para determinar o tipo de refeição a partir do nome
+  const getMealTypeFromName = (mealName: string): string => {
+    const name = mealName.toLowerCase();
+    if (name.includes('café')) return 'breakfast';
+    if (name.includes('almoço')) return 'lunch';
+    if (name.includes('jantar')) return 'dinner';
+    if (name.includes('lanche') && name.includes('manhã')) return 'morning_snack';
+    if (name.includes('lanche')) return 'afternoon_snack';
+    return 'other';
+  };
+
   // Efeito para carregar o status inicial das refeições
   useEffect(() => {
     // Carregar status das refeições quando o componente montar
@@ -222,6 +319,36 @@ const Dashboard = () => {
     return () => {
       window.removeEventListener('meal-completed', handleMealCompleted as EventListener);
       window.removeEventListener('storage', loadMealStatus);
+    };
+  }, []);
+
+  useEffect(() => {
+    const checkDailyReset = async () => {
+      try {
+        if (todaysMeals.length > 0) {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+            // Agora podemos chamar a função com as refeições carregadas
+            await checkAndResetDailyMeals(todaysMeals);
+            console.log('Verificação de reset diário concluída com sucesso');
+          }
+        }
+      } catch (error) {
+        console.error('Erro ao verificar reset diário:', error);
+      }
+    };
+    
+    checkDailyReset();
+  }, [todaysMeals]);
+
+  // Inicializar o sistema de lembretes de refeições
+  useEffect(() => {
+    // Inicializar o sistema de lembretes quando o Dashboard for montado
+    const cleanupReminders = initializeMealReminders();
+    
+    // Limpar o sistema de lembretes quando o Dashboard for desmontado
+    return () => {
+      cleanupReminders();
     };
   }, []);
 
@@ -413,8 +540,10 @@ const Dashboard = () => {
     });
   };
 
+  // --- FIXED TodaysMealsCard JSX ---
   const TodaysMealsCard = () => {
-    return <div className="mb-8 bg-white rounded-xl shadow-sm border border-slate-100 p-6">
+    return (
+      <div className="mb-8 bg-white rounded-xl shadow-sm border border-slate-100 p-6">
         <div className="flex justify-between items-center mb-6">
           <h2 className="font-display font-semibold text-slate-900 text-lg">Refeições de Hoje</h2>
           <Button variant="outline" size="sm" className="text-sm" asChild>
@@ -433,103 +562,159 @@ const Dashboard = () => {
                 <p className="text-sm text-slate-500">{meal.time}</p>
                 <p className="font-medium text-slate-900">{meal.name}</p>
               </div>
-              
               {meal.status === 'completed' ? (
                 <div className="flex gap-2">
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
+                  <Button
+                    variant="outline"
+                    size="sm"
                     className="text-amber-600 border-amber-300 hover:bg-amber-50 h-9 px-3 text-xs whitespace-nowrap"
                     onClick={() => handleUndoMealCompleted(meal.id)}
                   >
                     <RefreshCw className="h-3 w-3 mr-1" />
                     Desfazer
                   </Button>
-                  
-                  <MealInfoModal 
-                    meal={meal} 
-                    onMealCompleted={handleMealCompleted} 
-                    onUndoMealCompleted={handleUndoMealCompleted}
-                    trigger={<Button variant="outline" size="sm" className="text-slate-600 border-slate-300 hover:bg-slate-50 h-9 px-3 text-xs whitespace-nowrap">
-                      Ver detalhes
-                    </Button>}
+                  <MealInfoSimple
+                    trigger={
+                      <Button variant="outline" size="sm" className="text-slate-600 border-slate-300 hover:bg-slate-50 h-9 px-3 text-xs whitespace-nowrap">
+                        Ver detalhes
+                      </Button>
+                    }
                   />
                 </div>
               ) : (
                 <div className="flex gap-2">
-                  <Button 
-                    variant="default" 
-                    size="sm" 
-                    className="bg-green-600 hover:bg-green-700 text-white h-9 px-3 text-xs whitespace-nowrap"
+                  <Button
+                    variant="default"
+                    size="sm"
+                    className="bg-green-500 hover:bg-green-600 text-white h-9 px-3 text-xs whitespace-nowrap"
                     onClick={() => handleMealCompleted(meal.id)}
                   >
-                    Confirmar {meal.name}
+                    Confirmar
                   </Button>
-                  
-                  <MealInfoModal 
-                    meal={meal} 
-                    onMealCompleted={handleMealCompleted} 
-                    onUndoMealCompleted={handleUndoMealCompleted}
-                    trigger={<Button variant="outline" size="sm" className="text-slate-600 border-slate-300 hover:bg-slate-50 h-9 px-3 text-xs whitespace-nowrap">
-                      Ver detalhes
-                    </Button>}
+                  <MealInfoSimple
+                    trigger={
+                      <Button variant="outline" size="sm" className="text-slate-600 border-slate-300 hover:bg-slate-50 h-9 px-3 text-xs whitespace-nowrap">
+                        Ver detalhes
+                      </Button>
+                    }
                   />
                 </div>
               )}
             </div>
           ))}
         </div>
-      </div>;
-  };
-
-  const StatusCards = () => (
-    <div className="flex justify-center mb-8">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl w-full">
-        <CalorieTracker2 />
-        
-        <Card className="bg-white rounded-xl shadow-sm border border-slate-100 p-4">
-          <div className="flex justify-between items-start mb-3">
-            <div>
-              <h3 className="text-sm font-medium text-slate-600">Estado Emocional</h3>
-              <p className="md:text-lg font-semibold text-zinc-950 text-sm">Equilibrado hoje</p>
-            </div>
-            <div className="bg-purple-50 p-2 rounded-lg">
-              <Brain className="h-4 w-4 md:h-5 md:w-5 text-purple-500" />
-            </div>
-          </div>
-          <Button className="w-full bg-purple-500 hover:bg-purple-600 text-white text-xs md:text-sm h-8 font-medium" asChild>
-            <Link to="/emotional-support">
-              Acessar ferramentas
-            </Link>
-          </Button>
-        </Card>
-        
-        <Card className="bg-white rounded-xl shadow-sm border border-slate-100 p-4">
-          <div className="flex justify-between items-start mb-3">
-            <div>
-              <h3 className="text-sm font-medium text-slate-600">Próximo Check-in</h3>
-              <p className="md:text-lg font-semibold text-zinc-950 text-sm">Em 2 dias</p>
-            </div>
-            <div className="bg-green-50 p-2 rounded-lg">
-              <CalendarDays className="h-4 w-4 md:h-5 md:w-5 text-green-500" />
-            </div>
-          </div>
-          <Button className="w-full bg-green-500 hover:bg-green-600 text-white text-xs md:text-sm h-8 font-medium" asChild>
-            <Link to="/check-in">
-              Ver detalhes
-            </Link>
-          </Button>
-        </Card>
       </div>
-    </div>
-  );
+    );
+  };
 
   const TrackingCards = () => (
     <div className="flex justify-center mb-8">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl w-full">
-        <ExerciseGoalTracker goal={150} current={75} unit="minutos" />
-        <MealTracker />
-        <WaterIntakeTracker />
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-5xl w-full">
+        {/* Primeira linha: Componentes principais de nutrição e atividade física */}
+        <Card className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+          <CardHeader className="pb-2">
+            <div className="flex justify-between items-center">
+              <div className="flex items-center">
+                <Utensils className="h-5 w-5 text-green-600 mr-2" />
+                <CardTitle className="text-lg font-medium">Nutrição</CardTitle>
+              </div>
+              <Button variant="ghost" size="sm" className="h-8 px-2">
+                <BarChart className="h-4 w-4 mr-1" />
+                Analisar
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <MealTracker />
+          </CardContent>
+        </Card>
+
+        <Card className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+          <CardHeader className="pb-2">
+            <div className="flex justify-between items-center">
+              <div className="flex items-center">
+                <LineChart className="h-5 w-5 text-blue-600 mr-2" />
+                <CardTitle className="text-lg font-medium">Calorias</CardTitle>
+              </div>
+              <Button variant="ghost" size="sm" className="h-8 px-2">
+                <RefreshCw className="h-4 w-4 mr-1" />
+                Zerar
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <CalorieTracker2 />
+          </CardContent>
+        </Card>
+
+        <Card className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+          <CardHeader className="pb-2">
+            <div className="flex justify-between items-center">
+              <div className="flex items-center">
+                <Dumbbell className="h-5 w-5 text-amber-600 mr-2" />
+                <CardTitle className="text-lg font-medium">Exercícios</CardTitle>
+              </div>
+              <Button variant="ghost" size="sm" className="h-8 px-2" asChild>
+                <Link to="/exercise">
+                  <Trophy className="h-4 w-4 mr-1" />
+                  Detalhes
+                </Link>
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <ExerciseGoalTracker />
+          </CardContent>
+        </Card>
+
+        {/* Segunda linha: Hidratação e saúde mental */}
+        <Card className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+          <CardHeader className="pb-2">
+            <div className="flex justify-between items-center">
+              <div className="flex items-center">
+                <Droplet className="h-5 w-5 text-cyan-600 mr-2" />
+                <CardTitle className="text-lg font-medium">Hidratação</CardTitle>
+              </div>
+              <Button variant="ghost" size="sm" className="h-8 px-2">
+                <BarChart className="h-4 w-4 mr-1" />
+                Histórico
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <WaterIntakeTracker />
+          </CardContent>
+        </Card>
+        
+        <Card className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+          <CardHeader className="pb-2">
+            <div className="flex justify-between items-center">
+              <div className="flex items-center">
+                <Brain className="h-5 w-5 text-purple-600 mr-2" />
+                <CardTitle className="text-lg font-medium">Estado Emocional</CardTitle>
+              </div>
+              <Button variant="ghost" size="sm" className="h-8 px-2" asChild>
+                <Link to="/emotional-support">
+                  <MessageCircle className="h-4 w-4 mr-1" />
+                  Suporte
+                </Link>
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-2">
+            <div className="flex flex-col items-center py-2">
+              <div className="w-12 h-12 rounded-full bg-purple-100 flex items-center justify-center mb-3">
+                <Brain className="h-6 w-6 text-purple-600" />
+              </div>
+              <p className="text-slate-600 text-sm mb-4 text-center">Acompanhe e registre seu humor ao longo do dia</p>
+              <Button className="w-full bg-purple-600 hover:bg-purple-700 text-white" asChild>
+                <Link to="/emotional-support">
+                  Registrar Emoção
+                </Link>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
@@ -560,7 +745,7 @@ const Dashboard = () => {
           </Link>
         </div>
       </Card>
-      
+
       <Card className="bg-indigo-50 rounded-lg shadow-sm overflow-hidden border-none">
         <div className="p-6 flex flex-col items-center text-center">
           <MessageCircle className="h-8 w-8 text-indigo-600 mb-3" />
@@ -690,16 +875,7 @@ const Dashboard = () => {
               </div>
             </div>
 
-            <div className="border border-dashed border-purple-300 rounded-xl p-6 text-center bg-transparent">
-              <div className="max-w-2xl mx-auto text-purple-800">
-                <h3 className="text-2xl font-display font-semibold mb-4 leading-tight">
-                  Você está prestes a viver algo transformador.
-                </h3>
-                <p className="text-lg mb-4 opacity-90">
-                  Esse é o primeiro passo para ativar a sua melhor versão. Vamos juntas?
-                </p>
-              </div>
-            </div>
+            <Banner position="dashboard" />
 
             <div className="bg-gradient-to-r from-teal-500 to-green-600 rounded-xl shadow-md p-5">
               <div className="flex flex-col md:flex-row items-center justify-between gap-4">
@@ -723,7 +899,7 @@ const Dashboard = () => {
           
           <TodaysMealsCard />
           
-          <StatusCards />
+          {/* <StatusCards /> */}
           
           <TrackingCards />
           
@@ -789,11 +965,8 @@ const Dashboard = () => {
               </Card>
             </div>}
           
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 space-y-6">
-            </div>
-            
-            <div className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="md:col-span-2 lg:col-span-3">
               <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-slate-100 dark:border-gray-700 p-6">
                 <h2 className="text-lg font-display font-semibold mb-4 dark:text-white">Acesso Rápido</h2>
                 <div className="grid grid-cols-2 gap-3">

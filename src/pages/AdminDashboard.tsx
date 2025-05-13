@@ -529,6 +529,35 @@ const AdminDashboard = () => {
               </div>
             )}
             
+            <div className="flex justify-end mb-6 space-x-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className="inline-flex items-center"
+                onClick={handleRefreshUsers}
+              >
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Atualizar
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="inline-flex items-center"
+                onClick={() => window.location.href = '/references-admin'}
+              >
+                <FileUp className="h-4 w-4 mr-2" />
+                Biblioteca de Referências
+              </Button>
+              <Button
+                size="sm"
+                className="inline-flex items-center"
+                onClick={() => setIsAddUserDialogOpen(true)}
+              >
+                <UserPlus className="h-4 w-4 mr-2" />
+                Adicionar Usuário
+              </Button>
+            </div>
+            
             <TabsContent value="users" className="space-y-4">
               <Card>
                 <CardHeader className="pb-3">

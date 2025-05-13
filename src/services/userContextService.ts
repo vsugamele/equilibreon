@@ -41,6 +41,23 @@ export interface UserContextData {
   
   // Dados de onboarding completos
   onboardingData?: any;
+  onboarding?: {
+    goals?: string[];
+    health_conditions?: string[];
+    food_restrictions?: string[];
+    food_preferences?: string[];
+    additional_comments?: string;
+  };
+  
+  // Plano nutricional completo
+  nutritionPlan?: {
+    summary?: string;
+    recommendations?: string[];
+    foods?: {
+      toIncrease?: {food: string, reason: string}[];
+      toReduce?: {food: string, reason: string}[];
+    }
+  };
 }
 
 /**

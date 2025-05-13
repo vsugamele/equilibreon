@@ -15,6 +15,8 @@ import EditProfileForm from '@/components/profile/EditProfileForm';
 import AvatarUpload from '@/components/profile/AvatarUpload';
 import BasicInfoForm from '@/components/profile/BasicInfoForm';
 import AddressForm from '@/components/profile/AddressForm';
+import RecentExams from '@/components/dashboard/RecentExams';
+import RecentProgressPhotos from '@/components/dashboard/RecentProgressPhotos';
 
 // Interface completa com todos os campos necessários
 interface UserProfile {
@@ -841,15 +843,8 @@ const ProfilePage = () => {
                     Exames Recentes
                   </CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <div className="flex flex-col items-center justify-center py-6 text-center">
-                    <FileText className="h-10 w-10 text-slate-300 mb-2" />
-                    <p className="text-slate-500">Nenhum exame encontrado</p>
-                    <p className="text-sm text-slate-400 mt-1">Faça upload de seus exames para receber análises</p>
-                  </div>
-                  <Button variant="outline" className="w-full mt-4" asChild>
-                    <Link to="/profile/exams">Ver Todos os Exames</Link>
-                  </Button>
+                <CardContent className="pt-0">
+                  <RecentExams maxItems={2} />
                 </CardContent>
               </Card>
 
@@ -860,15 +855,8 @@ const ProfilePage = () => {
                     Fotos de Progresso
                   </CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <div className="flex flex-col items-center justify-center py-6 text-center">
-                    <Camera className="h-10 w-10 text-slate-300 mb-2" />
-                    <p className="text-slate-500">Nenhuma foto encontrada</p>
-                    <p className="text-sm text-slate-400 mt-1">Adicione fotos para acompanhar seu progresso</p>
-                  </div>
-                  <Button variant="outline" className="w-full mt-4" asChild>
-                    <Link to="/profile/photos">Ver Todas as Fotos</Link>
-                  </Button>
+                <CardContent className="pt-0">
+                  <RecentProgressPhotos maxItems={2} />
                 </CardContent>
               </Card>
             </div>

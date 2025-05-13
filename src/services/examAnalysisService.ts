@@ -2,9 +2,12 @@ import axios from 'axios';
 import { supabase } from '@/integrations/supabase/client';
 import OpenAI from 'openai';
 import { openaiConfig } from '../integrations/supabase/config';
-import { Json } from '@/types/supabase';
+// Importar o serviço OpenAI que já funciona para análise de alimentos
+import { analyzeImageWithOpenAI } from './openaiService';
 import { getUserContextData, formatUserContextForPrompt, UserContextData } from '@/services/userContextService';
 import { enrichPromptWithReferences } from './referenceLibraryService';
+import medicalExamsAnalysisPrompt from '@/utils/promptTemplates/medicalExamsAnalysis';
+import { convertAnalysisTextToHTML } from '@/utils/textFormatting';
 
 // Tipos de exames comuns
 export const COMMON_EXAM_TYPES = [
@@ -72,14 +75,16 @@ export const analyzeExamWithAI = async (
   customApiKey?: string
 ): Promise<ExamAnalysisResult> => {
   try {
-    // Usar a chave da OpenAI da configuração explícita
-    const apiKey = openaiConfig.apiKey;
+    // Inicializar o cliente OpenAI diretamente com a chave da API do config
+    const apiKey = customApiKey || openaiConfig.apiKey;
     
-    console.log('ExamAnalysis: OpenAI API Key configurada:', !!apiKey);
+    if (!apiKey) {
+      throw new Error('OpenAI API key não configurada');
+    }
     
-    console.log('Usando chave da API OpenAI codificada no serviço');
+    console.log('ExamAnalysis: Usando chave de API:', apiKey.substring(0, 15) + '...');
     
-    // Inicializar cliente OpenAI com a chave codificada
+    // Inicializar cliente OpenAI com a chave
     const openai = new OpenAI({
       apiKey,
       dangerouslyAllowBrowser: true // Permitir uso no navegador apenas para desenvolvimento
@@ -137,9 +142,57 @@ export const analyzeExamWithAI = async (
     // Verificar se temos dados de contexto completos do usuário
     let contextualData = '';
     
+    // Enriquece o contexto com informações do usuário se disponíveis
+    let contextualInfo = '';
+    
     if (userContext) {
-      // Formatar dados contextuais do usuário para o prompt
-      contextualData = formatUserContextForPrompt(userContext);
+      contextualInfo = formatUserContextForPrompt(userContext);
+      
+      // Adicionar informações de onboarding
+      if (userContext.onboarding) {
+        contextualInfo += "\n\n### DADOS DE ONBOARDING DO PACIENTE:\n";
+        
+        // Adicionar metas e objetivos
+        if (userContext.onboarding.goals && userContext.onboarding.goals.length > 0) {
+          contextualInfo += "\n**Objetivos do paciente:** " + userContext.onboarding.goals.join(", ") + "\n";
+        }
+        
+        // Adicionar condições de saúde
+        if (userContext.onboarding.health_conditions && userContext.onboarding.health_conditions.length > 0) {
+          contextualInfo += "\n**Condições de saúde:** " + userContext.onboarding.health_conditions.join(", ") + "\n";
+        }
+        
+        // Adicionar alergias e restrições alimentares
+        if (userContext.onboarding.food_restrictions && userContext.onboarding.food_restrictions.length > 0) {
+          contextualInfo += "\n**Restrições alimentares:** " + userContext.onboarding.food_restrictions.join(", ") + "\n";
+        }
+        
+        // Adicionar preferências alimentares
+        if (userContext.onboarding.food_preferences && userContext.onboarding.food_preferences.length > 0) {
+          contextualInfo += "\n**Preferências alimentares:** " + userContext.onboarding.food_preferences.join(", ") + "\n";
+        }
+        
+        // Adicionar comentários/notas adicionais
+        if (userContext.onboarding.additional_comments) {
+          contextualInfo += "\n**Notas adicionais do paciente:** " + userContext.onboarding.additional_comments + "\n";
+        }
+      }
+      
+      // Adicionar informações do plano alimentar atual se disponível
+      if (userContext.nutritionPlan) {
+        contextualInfo += "\n\n### PLANO ALIMENTAR ATUAL DO PACIENTE:\n";
+        
+        // Adicionar detalhes do plano alimentar
+        if (userContext.nutritionPlan.summary) {
+          contextualInfo += "\n" + userContext.nutritionPlan.summary + "\n";
+        }
+        
+        // Incluir recomendações específicas do plano alimentar
+        if (userContext.nutritionPlan.recommendations && userContext.nutritionPlan.recommendations.length > 0) {
+          contextualInfo += "\n**Recomendações nutricionais atuais:** \n- " + 
+            userContext.nutritionPlan.recommendations.join("\n- ") + "\n";
+        }
+      }
     } else if (patientData) {
       // Usar dados básicos do paciente se não tiver contexto completo
       contextualData = `
@@ -153,11 +206,9 @@ export const analyzeExamWithAI = async (
       `;
     }
     
-    // Montar o prompt base com o contexto do paciente, tipo de exame e o conteúdo do exame
+    // Usar o prompt aprimorado para análise de exames médicos
     const basePrompt = `
-      Você é um médico especialista em saúde integrativa, nutrição funcional e epigenética aplicada com 20 anos de experiência clínica. Sua missão é analisar exames laboratoriais com extrema precisão, focando na otimização da saúde e prevenção de doenças crônicas. Você interpreta marcadores à luz das complexas interações entre nutrição, metabolismo, genética, estilo de vida e meio ambiente.
-      
-      IMPORTANTE: Você deve usar os valores ideais funcionais fornecidos abaixo e NÃO apenas as referências clínicas padrão. Sua especialidade é detectar padrões subclínicos, correlações sutis entre múltiplos marcadores, e identificar áreas de risco silencioso que médicos convencionais frequentemente ignoram.
+      ${medicalExamsAnalysisPrompt}
       
       Tipo de Exame: ${detectedExamType}
       
@@ -199,19 +250,24 @@ export const analyzeExamWithAI = async (
       - TGO: [10-20]
       - TGP: [10-20]
       
-      INSTRUÇÕES PARA ANÁLISE DETALHADA:
+      INSTRUÇÕES PARA ANÁLISE DETALHADA E INTEGRATIVA:
       1. EXAMINE MINUCIOSAMENTE os valores laboratoriais REAIS mencionados no exame acima.
       2. Identifique cada valor presente com sua medida e compare com os valores ideais funcionais acima, NÃO apenas com as referências do laboratório.
-      3. Baseie suas interpretações nas seguintes áreas, fornecendo explicações detalhadas e específicas:
+      3. IDENTIFIQUE CLARAMENTE os parâmetros ótimos para cada marcador, considerando a saúde integrativa e não apenas a ausência de doença.
+      4. Para cada valor alterado, INDIQUE EXPLICITAMENTE a gravidade do desvio (leve, moderado, grave) e o impacto potencial na saúde global.
+      5. Baseie suas interpretações nas seguintes áreas, fornecendo explicações detalhadas e específicas:
          - Bioquímica individualizada: Analise detalhadamente vitaminas, minerais, marcadores de inflamação e capacidade de detoxificação
          - Eixos hormonais: Avalie profundamente as interações entre tireoide, insulina, cortisol e outros hormônios
          - Riscos cardiometabólicos: Identifique padrões de risco mesmo quando os valores estão "normais" pelas referências convencionais
          - Ciclo metilação ↔ homocisteína ↔ B12/B9: Avalie detalhadamente este ciclo bioquimico crucial
          - Stress oxidativo e função mitocondrial: Identifique sinais de comprometimento energético celular
          - Sinais epigenéticos: Analise como nutrientes, sono, toxinas, saúde intestinal e padrões de jejum estão afetando a expressão genética
-      4. Detecte padrões subclínicos e correlações sutis entre múltiplos marcadores, mesmo quando estão dentro das referências laboratoriais convencionais.
-      5. CONSIDERE CUIDADOSAMENTE o contexto do paciente (idade, gênero, objetivos, condições de saúde, plano alimentar atual) ao fazer suas recomendações.
-      6. Se o exame estiver muito ilegível ou não fornecer informações suficientes, forneça orientações detalhadas baseadas no tipo de exame e no contexto do paciente.
+         - Desequilíbrios do microbioma: Identifique sinais de disbiose intestinal e sua relação com os marcadores alterados
+         - Equilíbrio ácido-base: Avalie sinais de acidose metabólica ou alcalose e seu impacto na saúde
+      6. Detecte padrões subclínicos e correlações sutis entre múltiplos marcadores, mesmo quando estão dentro das referências laboratoriais convencionais.
+      7. CONSIDERE CUIDADOSAMENTE o contexto do paciente (idade, gênero, objetivos, condições de saúde, plano alimentar atual) ao fazer suas recomendações.
+      8. CORRELACIONE os valores alterados com possíveis sintomas como fadiga, problemas de concentração, insônia, queda de cabelo, pele seca, e outros sintomas comuns.
+      9. Se o exame estiver muito ilegível ou não fornecer informações suficientes, forneça orientações detalhadas baseadas no tipo de exame e no contexto do paciente.
       
       Forneça uma análise EXTREMAMENTE DETALHADA no formato JSON com os seguintes campos:
       
@@ -232,12 +288,14 @@ export const analyzeExamWithAI = async (
          - POR QUE esta recomendação é importante para este paciente específico
          - Resultados esperados
       
-      4. nutritionRecommendations: Array com pelo menos 5-7 recomendações nutricionais EXTREMAMENTE ESPECÍFICAS e PRÁTICAS, indicando:
+      4. nutritionRecommendations: Array com pelo menos 7-10 recomendações nutricionais EXTREMAMENTE ESPECÍFICAS e PRÁTICAS, indicando:
          - Alimentos específicos (não apenas categorias gerais)
          - Quantidades e frequência de consumo (ex: "2 colheres de sopa de sementes de abóbora por dia")
-         - Métodos de preparo ideais
-         - Combinações de alimentos para melhor absorção de nutrientes
+         - Métodos de preparo ideais para preservar nutrientes
+         - Combinações de alimentos para melhor absorção de nutrientes (ex: "consumir alimentos ricos em ferro junto com fonte de vitamina C")
          - Horários ideais de consumo quando relevante
+         - Substituições para casos de intolerâncias ou alergias comuns
+         - Receitas práticas e rápidas incorporando os alimentos recomendados
       
       5. nutritionImpact: Objeto contendo:
          - foodsToIncrease: Array de alimentos para aumentar o consumo, cada item com:
@@ -267,123 +325,295 @@ export const analyzeExamWithAI = async (
          - Impacto na saúde geral e nos marcadores do exame
          - Fontes alimentares específicas recomendadas
          - Suplementação recomendada quando apropriado (tipo, dosagem, forma e timing)
+         - Interações potenciais com medicamentos ou outras suplementações
+         - Efeitos colaterais potenciais a serem monitorados
       
-      9. functionalPathways: Array com trilhas de intervenção personalizadas, como:
+      9. supplementationProtocol: Array detalhado com protocolos de suplementação específicos para cada deficiência ou desequilíbrio identificado, incluindo:
+         - Nome do suplemento (forma específica, como "metilcobalamina" em vez de apenas "B12")
+         - Dosagem exata recomendada (com unidades precisas)
+         - Frequência e horário ideal de administração
+         - Duração sugerida do protocolo
+         - Marcadores a serem monitorados para avaliar eficácia
+         - Ajustes potenciais de dosagem ao longo do tempo
+         - Combinações sinergísticas com outros suplementos
+         - Contra-indicações e precauções
+         - Observação clara de que a suplementação deve ser ajustada por um nutricionista
+      
+      10. nutritionistConsultation: Objeto contendo:
+         - necessityLevel: Nível de necessidade de consulta com nutricionista ("recomendado", "altamente recomendado", "essencial")
+         - focusAreas: Áreas específicas que o nutricionista deve focar
+         - requiredAdjustments: Ajustes que provavelmente serão necessários por um profissional
+         - monitoringParameters: Parâmetros que devem ser monitorados durante o acompanhamento
+         - consultationFrequency: Frequência sugerida de consultas de acompanhamento
+      
+      11. functionalPathways: Array com trilhas de intervenção personalizadas, como:
          - Investigações adicionais recomendadas (ex: "Investigar polimorfismos genéticos de MTHFR, COMT, SOD2")
          - Exames complementares específicos recomendados
          - Protocolos de intervenção funcional detalhados
          - Cronograma sugerido para implementação e reavaliação
       
-      10. lifestyleChanges: Array com recomendações DETALHADAS de estilo de vida para otimização da saúde, incluindo:
+      12. lifestyleChanges: Array com recomendações DETALHADAS de estilo de vida para otimização da saúde, incluindo:
           - Práticas específicas de sono e gerenciamento de estresse
           - Exposição à luz e natureza
           - Redução de toxinas ambientais (ex: "Evitar plástico com BPA, agrotóxicos e ultraprocessados")
           - Práticas de jejum intermitente quando apropriado
           - Técnicas de respiração e mindfulness
-          - Sugestões de suplementação com dosagens específicas
+          - Rotinas diárias específicas para implementação imediata
+          
+      13. symptomMapping: Objeto detalhando a correlação entre os valores alterados nos exames e sintomas comuns, incluindo:
+          - fatigue: Relação com marcadores de energia (ferro, B12, D, tireoide, etc.)
+          - cognition: Impacto nos marcadores relacionados à função cognitiva e concentração
+          - sleep: Relação com hormonal e desequilíbrios que afetam o sono
+          - hairLoss: Correlação com deficiências nutricionais que afetam cabelo
+          - drySkin: Marcadores relacionados à saúde da pele
+          - digestiveIssues: Relação com marcadores de inflamação e saúde digestiva
+          - moodChanges: Impacto nos neurotransmissores e equilíbrio hormonal
+          - weightIssues: Correlação com metabolismo e marcadores hormonais
+          
+      14. additionalTestsRecommendation: Array com exames complementares recomendados, cada um contendo:
+          - testName: Nome do exame recomendado
+          - justification: Justificativa detalhada baseada nos resultados atuais
+          - expectedFindings: O que se espera encontrar e como isso complementaria o diagnóstico
+          - priority: Prioridade do exame ("alta", "média", "baixa")
+          - timeframe: Quando o exame deve ser realizado
       
       DIRETRIZES OBRIGATÓRIAS:
       - Suas recomendações devem ser personalizadas e acionáveis (ex: "Consumir 2 porções de vegetais verde-escuros por dia" em vez de "Comer mais vegetais")
       - Use linguagem acessível mas precisa cientificamente
+      - SEMPRE apresente os valores de referência do laboratório E os valores ótimos funcionais lado a lado para cada parâmetro analisado
       - Identifique claramente micronutrientes que precisam ser aumentados ou diminuídos
       - Considere as metas e condições de saúde do paciente nas recomendações
       - Inclua recomendações específicas para suplementação quando apropriado, com dosagens sugeridas
+      - SEMPRE inclua uma observação clara de que as suplementações recomendadas devem ser ajustadas por um nutricionista
+      - Para cada valor alterado, indique CLARAMENTE o que deve ser feito (aumentar, diminuir, monitorar)
       - Sugira exames complementares quando necessário para investigação mais profunda
+      - Correlacione os valores dos exames com sintomas comuns que o paciente possa estar experimentando
+      - Indique a data de realização do exame quando disponível, em vez de solicitar esta informação separadamente
+      - Inclua um aviso sobre a necessidade de consulta com nutricionista para ajustes personalizados nas dosagens de suplementos
       
       Responda APENAS com o objeto JSON sem explicações adicionais. Seja o mais preciso possível.
     `;
     
-    // Fazer chamada para a API da OpenAI
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [
-        { role: "system", content: "Você é um especialista em interpretação de exames médicos com foco em nutrição e saúde geral." },
-        { role: "user", content: prompt }
-      ],
-      temperature: 0.2, // Baixa temperatura para respostas mais consistentes
-      max_tokens: 2000
-    });
+    // Converter o texto do exame em um arquivo para usar a função analyzeImageWithOpenAI
+    // Garantimos que o conteúdo do exame seja corretamente convertido em um Blob
+    // e depois em um arquivo, para que a API possa processá-lo corretamente
+    let examFile;
     
-    // Extrair e processar a resposta da IA
-    const responseText = response.choices[0]?.message?.content || '';
+    try {
+      // Passo 1: Converter o texto em ArrayBuffer
+      const encoder = new TextEncoder();
+      const arrayBuffer = encoder.encode(fileContent);
+      
+      // Passo 2: Criar um Blob com o ArrayBuffer
+      const examBlob = new Blob([arrayBuffer], { type: 'text/plain' });
+      
+      // Passo 3: Criar um File a partir do Blob
+      examFile = new File([examBlob], 'exam.txt', { type: 'text/plain' });
+      
+      console.log(`Arquivo de exame preparado com sucesso: ${examFile.size} bytes`);
+    } catch (error) {
+      console.error('Erro ao preparar o arquivo do exame:', error);
+      // Fallback para método mais simples em caso de erro
+      examFile = new File([fileContent], 'exam.txt', { type: 'text/plain' });
+    }
     
-    // Método robusto para extrair JSON da resposta
-    const extractJson = (text: string): any => {
-      // Primeira opção: tentar parse direto
-      try {
-        const parsed = JSON.parse(text);
-        console.log('Parse JSON direto bem-sucedido');
-        return parsed;
-      } catch (directError) {
-        console.log('Erro no parse direto, tentando extrair corpo JSON...');
+    // Usar a função que já funciona para análise de alimentos, mas com o tipo 'EXAMS'
+    const aiResponse = await analyzeImageWithOpenAI(examFile, 'EXAMS');
+    
+    if (!aiResponse.success) {
+      throw new Error(`Falha na análise do exame: ${aiResponse.error}`);
+    }
+    
+    // Extrair o texto da resposta (vamos lidar com o conteúdo bruto)
+    // A resposta pode ser texto puro ou objeto, dependendo de como a API retornou
+    let responseText = '';
+    if (typeof aiResponse.data === 'string') {
+      responseText = aiResponse.data;
+    } else if (aiResponse.data?.text) {
+      responseText = aiResponse.data.text;
+    } else {
+      responseText = JSON.stringify(aiResponse.data) || '';
+    }
+    
+    console.log('Resposta bruta da API:', responseText.substring(0, 200) + '...');
+    
+    // Novo processamento para preservar o formato rico do texto
+    // A resposta do OpenAI agora vem com o formato completo definido no prompt
+    const processStructuredResponse = (text: string): ExamAnalysisResult => {
+      console.log('Processando resposta estruturada...');
+      
+      // Extrair o resumo da análise (primeiro parágrafo após "Introdução:")
+      let summary = '';
+      const introMatch = text.match(/Introdução:\s*(.*?)(?=\n\n|$)/s);
+      if (introMatch && introMatch[1]) {
+        summary = introMatch[1].trim();
       }
       
-      // Segunda opção: encontrar padrão de JSON na resposta
-      try {
-        // Buscar por objeto JSON completo usando regex
-        const jsonRegex = /\{[\s\S]*\}/;
-        const match = text.match(jsonRegex);
+      // Extrair as recomendações nutricionais
+      const nutritionRecommendations: string[] = [];
+      const nutritionMatch = text.match(/Sugestões de Intervenção Funcional & Nutricional\s*(.*?)(?=\n\nPróximos Passos|$)/s);
+      if (nutritionMatch && nutritionMatch[1]) {
+        const nutritionText = nutritionMatch[1];
+        // Dividir por linhas e filtrar linhas vazias
+        const lines = nutritionText.split('\n').filter(line => line.trim().length > 0);
+        nutritionRecommendations.push(...lines);
+      }
+      
+      // Extrair valores anormais (usando a seção "Marcadores em Destaque")
+      const abnormalValues: AbnormalValue[] = [];
+      const markersMatch = text.match(/Marcadores em Destaque.*?\s*(.*?)(?=\n\nSugestões|$)/s);
+      if (markersMatch && markersMatch[1]) {
+        const markersText = markersMatch[1];
+        // Extrair cada linha de valores anormais
+        const lines = markersText.split('\n').filter(line => line.trim().length > 0);
         
-        if (match && match[0]) {
-          console.log('Padrão JSON encontrado, tentando parse...');
-          return JSON.parse(match[0]);
-        }
-      } catch (regexError) {
-        console.log('Erro ao extrair JSON com regex:', regexError);
-      }
-      
-      // Terceira opção: tentar extrair campos individuais e montar o objeto
-      try {
-        console.log('Tentando extração manual de campos...');
-        const result: any = {
-          summary: "",
-          abnormalValues: [],
-          recommendations: [],
-          nutritionRecommendations: [],
-          nutritionImpact: {
-            foodsToIncrease: [],
-            foodsToReduce: []
+        // Processar cada linha para encontrar o nome do marcador e seu valor
+        lines.forEach(line => {
+          // Tenta extrair no formato "Marcador: valor (ideal valor)" ou padrões similares
+          const match = line.match(/([\w\s]+):\s*([\d\.\,]+)\s*\(?([^)]+)?\)?/i);
+          if (match) {
+            // Determinar a severidade com base na diferença entre o valor e a referência
+            let severity: 'low' | 'medium' | 'high' = 'medium';
+            
+            // Verificar se há pistas no texto sobre a gravidade
+            const lineText = line.toLowerCase();
+            if (lineText.includes('muito baixo') || lineText.includes('severo') || 
+                lineText.includes('crítico') || lineText.includes('grave')) {
+              severity = 'high';
+            } else if (lineText.includes('leve') || lineText.includes('ligeiramente')) {
+              severity = 'low';
+            }
+            
+            abnormalValues.push({
+              name: match[1].trim(),
+              value: match[2].trim(),
+              reference: match[3] ? match[3].trim() : 'Valor de referência não informado',
+              severity
+            });
+          } else {
+            // Se não conseguir extrair no formato padrão, adiciona a linha completa
+            const parts = line.split(':');
+            if (parts.length >= 2) {
+              const name = parts[0].trim();
+              const valueText = parts.slice(1).join(':').trim();
+              
+              abnormalValues.push({
+                name,
+                value: valueText,
+                reference: 'Valor de referência não informado',
+                severity: 'medium' // Severidade padrão se não for possível determinar
+              });
+            }
           }
-        };
-        
-        // Extrair summary usando regex
-        const summaryMatch = text.match(/summary["']?\s*:\s*["']([^"']+)["']/i);
-        if (summaryMatch && summaryMatch[1]) {
-          result.summary = summaryMatch[1];
-        }
-        
-        // Extrair recomendações - buscar padrão de arrays
-        const recsMatch = text.match(/recommendations["']?\s*:\s*\[([^\]]+)\]/i);
-        if (recsMatch && recsMatch[1]) {
-          const items = recsMatch[1].split(',').map(item => 
-            item.trim().replace(/["']/g, '')
-          );
-          result.recommendations = items;
-        }
-        
-        // Verificar se conseguimos extrair alguns dados
-        if (result.summary || result.recommendations.length > 0) {
-          console.log('Extração manual parcialmente bem-sucedida');
-          return result;
-        }
-      } catch (manualError) {
-        console.log('Erro na extração manual:', manualError);
+        });
       }
       
-      // Se todas as abordagens falharem, retornar null para acionar o fallback
-      return null;
+      // Extrair recomendações gerais (Próximos Passos)
+      const recommendations: string[] = [];
+      const nextStepsMatch = text.match(/Próximos Passos Sugeridos\s*(.*?)(?=\n\n|$)/s);
+      if (nextStepsMatch && nextStepsMatch[1]) {
+        const nextStepsText = nextStepsMatch[1];
+        const lines = nextStepsText.split('\n').filter(line => line.trim().length > 0);
+        recommendations.push(...lines);
+      }
+      
+      // Extrair alimentos para aumentar/reduzir da seção de nutrição
+      const foodsToIncrease: {food: string, reason: string}[] = [];
+      const foodsToReduce: {food: string, reason: string}[] = [];
+      
+      // Buscar informações sobre alimentos na seção de nutrição
+      if (nutritionMatch && nutritionMatch[1]) {
+        const nutritionText = nutritionMatch[1];
+        
+        // Identificar alimentos para aumentar (assumindo que estão no início da seção)
+        const increaseLines = nutritionText.split('\n').slice(0, 10).filter(line => 
+          line.includes('alimentos') || 
+          line.includes('consumo') || 
+          line.includes('fontes')
+        );
+        
+        increaseLines.forEach(line => {
+          const food = line.trim();
+          const reason = 'Recomendado para melhorar equilíbrio metabólico';
+          foodsToIncrease.push({ food, reason });
+        });
+        
+        // Identificar alimentos para reduzir (assumindo que estão após os alimentos para aumentar)
+        const reduceLines = nutritionText.split('\n').filter(line => 
+          line.includes('evitar') || 
+          line.includes('reduzir') || 
+          line.includes('eliminar')
+        );
+        
+        reduceLines.forEach(line => {
+          const food = line.trim();
+          const reason = 'Pode estar contribuindo para desequilíbrios metabólicos';
+          foodsToReduce.push({ food, reason });
+        });
+      }
+      
+      // Extrair conteúdo para o resumo
+      // Usamos o texto da introdução como resumo principal, mas mantemos o texto completo
+      // disponibilizando-o nos campos de recomendação para garantir que seja exibido 
+      
+      // Construir objeto de resultado no formato esperado
+      const result: ExamAnalysisResult = {
+        // O resumo principal é o texto da introdução (mais curto e conciso)
+        summary: summary || 'Análise funcional personalizada de exames laboratoriais',
+        
+        // Valores anormais encontrados no exame
+        abnormalValues,
+        
+        // As recomendações incluem o texto completo para preservar toda a formatação
+        // e garantir que o conteúdo íntegro seja exibido ao usuário
+        recommendations: text ? [text] : recommendations,
+        
+        // Recomendações nutricionais específicas
+        nutritionRecommendations,
+        
+        // Impacto nutricional e listas de alimentos
+        nutritionImpact: {
+          foodsToIncrease,
+          foodsToReduce
+        },
+        
+        // Campos adicionais opcionais
+        exerciseRecommendations: [],
+        healthRisks: [],
+        potentialDeficiencies: []
+      };
+      
+      return result;
     };
     
-    // Tentar extrair o JSON com múltiplas estratégias
-    const parsedResult = extractJson(responseText);
+    // Demonstrar o texto completo no console para debug
+    console.log('Texto completo da resposta:', responseText.substring(0, 500) + '...');
     
-    // Se conseguimos extrair algo, retornar; caso contrário, usar fallback
-    if (parsedResult) {
-      return parsedResult;
-    } else {
-      console.error('Todos os métodos de extração de JSON falharam');
-      return createFallbackAnalysisResult(fileContent, examType);
-    }
+    // Vamos modificar completamente a abordagem
+    // O prompt já retorna um texto formatado, vamos transformá-lo diretamente em um formato que o frontend espera
+    // sem tentar extrair estruturas complexas
+    
+    return {
+      // Usar a primeira linha como resumo
+      summary: responseText.split('\n')[0] || 'Análise funcional de exames',
+      
+      // Valores anormais (manter vazio se não conseguirmos extrair)
+      abnormalValues: [],
+      
+      // Armazenar todo o texto formatado nas recomendações para exibir
+      // Colocando dentro de um array para satisfazer a interface ExamAnalysisResult
+      recommendations: [responseText],
+      
+      // Campos extras para compatibilidade
+      nutritionRecommendations: [],
+      nutritionImpact: {
+        foodsToIncrease: [],
+        foodsToReduce: []
+      },
+      exerciseRecommendations: [],
+      healthRisks: [],
+      potentialDeficiencies: []
+    };
   } catch (error) {
     console.error('Erro na análise do exame:', error);
     throw error;
@@ -435,15 +665,24 @@ export const saveExamAnalysis = async (examId: string, analysisResult: ExamAnaly
   try {
     // Converter o objeto analysisResult para um formato compatível com o banco
     // Convertendo para Json (um tipo que o Supabase aceita)
-    const analysisResultJson = analysisResult as unknown as Json;
+    // Converter para any em vez de usar o tipo Json que foi removido
+    const analysisResultJson = analysisResult as unknown as Record<string, any>;
     
-    // Remover a coluna analyzed_at que não existe no schema
+    // Extrair o texto bruto do resumo - MANTER todos os marcadores ###
+    // Eles serão tratados pelo componente de formatação
+    const rawAnalysisText = analysisResult.summary || '';
+    
+    // Converter o texto bruto limpo para HTML formatado
+    const formattedAnalysisText = convertAnalysisTextToHTML(rawAnalysisText);
+    
+    // Atualizar o exame com todos os dados: o JSON completo da análise, o texto bruto e o HTML formatado
     const { error } = await supabase
       .from('medical_exams')
       .update({
         analysis: analysisResultJson,
+        raw_analysis_text: rawAnalysisText,
+        formatted_analysis_text: formattedAnalysisText,
         status: 'analyzed'
-        // Coluna analyzed_at removida pois não existe no banco
       })
       .eq('id', examId);
     
@@ -452,6 +691,7 @@ export const saveExamAnalysis = async (examId: string, analysisResult: ExamAnaly
       return false;
     }
     
+    console.log('Análise salva com sucesso, incluindo texto formatado');
     return true;
   } catch (error) {
     console.error('Erro ao salvar análise de exame:', error);

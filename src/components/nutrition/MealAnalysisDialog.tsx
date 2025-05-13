@@ -14,17 +14,21 @@ import {
 import { toast } from 'sonner';
 import { UploadCloud, Utensils, X } from 'lucide-react';
 import { analyzeMealImage, saveMealAnalysis, MealAnalysis } from '@/services/mealAnalysisService';
+import foodHistoryService from '@/services/foodHistoryService';
+import { supabase } from '@/integrations/supabase/client';
 
 interface MealAnalysisDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onMealConfirmed?: (analysis: MealAnalysis) => void;
+  mealId?: number; // ID da refeição que está sendo confirmada
 }
 
 const MealAnalysisDialog: React.FC<MealAnalysisDialogProps> = ({
   open,
   onOpenChange,
-  onMealConfirmed
+  onMealConfirmed,
+  mealId
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   
@@ -150,30 +154,158 @@ const MealAnalysisDialog: React.FC<MealAnalysisDialogProps> = ({
     if (!analysis) return;
     
     try {
+      // Verificar se o usuário está autenticado
+      const { data: { user } } = await supabase.auth.getUser();
+      const isAuthenticated = !!user;
+      
       // Atualizar o nome se foi alterado
       if (mealName && mealName !== analysis.foodName) {
         analysis.foodName = mealName;
       }
       
-      // Salvar a análise
-      const saved = await saveMealAnalysis(analysis);
+      // Adicionar descrição alternativa se disponível
+      if (alternativeFood.trim()) {
+        analysis.description = alternativeFood.trim();
+      }
       
-      if (saved) {
-        // Marcar análise como confirmada localmente
-        const confirmedAnalysis = { ...analysis, confirmed: true };
-        setAnalysis(confirmedAnalysis);
-        
-        // Notificar componente pai
+      // Marcar análise como confirmada localmente
+      const confirmedAnalysis = { 
+        ...analysis, 
+        confirmed: true,
+        // Garantir que os dados sejam transferidos corretamente
+        description: alternativeFood.trim() || analysis.description,
+        // Garantir que sugestedFoods seja uma array
+        suggestedFoods: analysis.suggestedFoods || []
+      };
+      setAnalysis(confirmedAnalysis);
+      
+      // Salvar a análise no localStorage
+      const saved = await saveMealAnalysis(confirmedAnalysis);
+      
+      // Salvar a análise no Supabase se o usuário estiver autenticado
+      let supabaseSaved = false;
+      if (isAuthenticated) {
+        try {
+          // Converter a análise para o formato esperado pelo foodHistoryService
+          const foodAnalysisResult = {
+            foodName: confirmedAnalysis.foodName,
+            dishName: confirmedAnalysis.foodName,
+            calories: confirmedAnalysis.nutrition.calories,
+            protein: confirmedAnalysis.nutrition.protein,
+            carbs: confirmedAnalysis.nutrition.carbs,
+            fat: confirmedAnalysis.nutrition.fat,
+            fiber: 0,
+            sugar: 0,
+            sodium: 0,
+            imageUrl: imagePreview,
+            confidence: 1,
+            foodItems: confirmedAnalysis.suggestedFoods.map(food => ({
+              name: food,
+              calories: Math.round(confirmedAnalysis.nutrition.calories / confirmedAnalysis.suggestedFoods.length),
+              portion: '100g'
+            })),
+            categories: [],
+            healthScore: 5,
+            dietaryTags: [],
+            userRecommendations: [],
+            analyzedAt: new Date() // Corrigir o tipo para Date em vez de string
+          };
+          
+          // Salvar no Supabase
+          console.log('Salvando análise no Supabase:', foodAnalysisResult);
+          const mealId = await foodHistoryService.saveAnalysis(foodAnalysisResult);
+          supabaseSaved = !!mealId;
+          
+          if (supabaseSaved) {
+            console.log('Análise salva com sucesso no Supabase com ID:', mealId);
+          } else {
+            console.error('Falha ao salvar análise no Supabase');
+          }
+        } catch (error) {
+          console.error('Erro ao salvar análise no Supabase:', error);
+        }
+      }
+      
+      if (saved || supabaseSaved) {
+        // Notificar componente pai com todos os dados necessários
         if (onMealConfirmed) {
+          console.log('Enviando dados completos para o modal anterior:', confirmedAnalysis);
           onMealConfirmed(confirmedAnalysis);
         }
         
+        // Disparar eventos para atualizar o contador de calorias
+        const calories = confirmedAnalysis.nutrition.calories;
+        
+        // 1. Obter o valor atual de calorias do localStorage
+        const currentCalories = localStorage.getItem('nutri-mindflow-calories');
+        const newTotal = (currentCalories ? parseInt(currentCalories) : 0) + calories;
+        
+        // 2. Atualizar o localStorage com o novo valor
+        localStorage.setItem('nutri-mindflow-calories', newTotal.toString());
+        
+        // 3. Disparar evento de atualização de calorias para sincronizar componentes
+        window.dispatchEvent(new CustomEvent('calories-updated', { 
+          detail: { calories: newTotal } 
+        }));
+        
+        // 4. Disparar evento de refeição adicionada
+      // Importante: O evento meal-added é usado pelo MealTracker, mas não atualiza as calorias
+      window.dispatchEvent(new CustomEvent('meal-added', {
+        detail: {
+          name: confirmedAnalysis.foodName,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          mealCalories: calories
+        }
+      }));
+      
+      // 5. Disparar um evento específico para o CalorieTracker2 processar
+      console.log('Disparando evento para atualizar calorias no CalorieTracker2');
+      window.dispatchEvent(new CustomEvent('add-calories', {
+        detail: {
+          calories: calories,
+          description: confirmedAnalysis.foodName
+        }
+      }));
+      
+      // 6. Disparar evento para atualizar o status do botão na tela principal
+      // Usar o mealId passado como prop ou determinar com base no nome/horário
+      let mealIdToUse = mealId || 0; // Usar o mealId passado como prop se disponível
+      
+      // Se não tiver mealId, tentar determinar com base no nome ou horário
+      if (!mealIdToUse) {
+        const mealName = confirmedAnalysis.foodName.toLowerCase();
+        const currentHour = new Date().getHours();
+        
+        if (mealName.includes('café') || mealName.includes('cafe') || mealName.includes('manhã') || (currentHour >= 5 && currentHour < 11)) {
+          mealIdToUse = 1; // Café da manhã
+        } else if (mealName.includes('almoço') || mealName.includes('almoco') || (currentHour >= 11 && currentHour < 15)) {
+          mealIdToUse = 2; // Almoço
+        } else if (mealName.includes('lanche') || (currentHour >= 15 && currentHour < 18)) {
+          mealIdToUse = 3; // Lanche da tarde
+        } else if (mealName.includes('jantar') || mealName.includes('janta') || (currentHour >= 18 && currentHour < 22)) {
+          mealIdToUse = 4; // Jantar
+        } else if (mealName.includes('ceia') || (currentHour >= 22 || currentHour < 5)) {
+          mealIdToUse = 5; // Ceia
+        }
+      }
+      
+      console.log(`Disparando evento meal-completed para a refeição ID: ${mealIdToUse}`);
+      window.dispatchEvent(new CustomEvent('meal-completed', {
+        detail: {
+          mealId: mealIdToUse
+        }
+      }));
+        
+        const saveLocation = supabaseSaved ? 'no Supabase e localStorage' : 'apenas no localStorage';
         toast.success("Refeição registrada", {
-          description: `${analysis.foodName} foi registrado com sucesso!`
+          description: `${analysis.foodName} foi registrado com sucesso ${saveLocation}! ${calories} calorias adicionadas.`
         });
         
         // Fechar diálogo
         onOpenChange(false);
+        
+        // Armazenar temporariamente os dados da análise para uso no modal anterior
+        localStorage.setItem('lastMealAnalysis', JSON.stringify(confirmedAnalysis));
       } else {
         toast.error("Erro ao salvar", {
           description: "Não foi possível salvar a análise. Tente novamente."
@@ -325,15 +457,21 @@ const MealAnalysisDialog: React.FC<MealAnalysisDialogProps> = ({
           /* Resultados da análise */
           <div className="space-y-4">
             <div className="flex justify-between items-center">
-              <h3 className="text-lg font-semibold">{analysis.foodName || mealName || 'Refeição'} - {new Date(analysis.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</h3>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setAnalysis(null)}
-                title="Analisar outra refeição"
-              >
-                <X className="h-4 w-4" />
-              </Button>
+              <div className="flex items-center space-x-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setAnalysis(null)}
+                  className="flex items-center space-x-1"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-arrow-left">
+                    <path d="m12 19-7-7 7-7"/>
+                    <path d="M19 12H5"/>
+                  </svg>
+                  <span>Voltar</span>
+                </Button>
+                <h3 className="text-lg font-semibold">{analysis.foodName || mealName || 'Refeição'} - {new Date(analysis.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</h3>
+              </div>
             </div>
             
             <p className="text-sm text-gray-700">
@@ -371,8 +509,27 @@ const MealAnalysisDialog: React.FC<MealAnalysisDialogProps> = ({
               <Textarea
                 placeholder="Descreva o que você comeu..."
                 className="h-20 mb-2"
+                value={alternativeFood}
+                onChange={(e) => setAlternativeFood(e.target.value)}
               />
-              <Button variant="outline" className="w-full mb-3">
+              <Button 
+                variant="outline" 
+                className="w-full mb-3" 
+                onClick={() => {
+                  // Salvar descrição alternativa
+                  if (alternativeFood.trim()) {
+                    // Atualizar a análise com a descrição alternativa
+                    const updatedAnalysis = {
+                      ...analysis,
+                      description: alternativeFood.trim()
+                    };
+                    setAnalysis(updatedAnalysis);
+                    toast.success("Descrição atualizada");
+                  }
+                  // Voltar para a tela de análise
+                  setAnalysis(null);
+                }}
+              >
                 Analisar outra refeição
               </Button>
             </div>
@@ -385,8 +542,20 @@ const MealAnalysisDialog: React.FC<MealAnalysisDialogProps> = ({
           </DialogClose>
           
           {analysis && (
-            <Button onClick={handleConfirmMeal}>
-              Confirmar Refeição
+            <Button 
+              onClick={handleConfirmMeal}
+              disabled={analysis.confirmed}
+            >
+              {analysis.confirmed ? (
+                <>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-check mr-2">
+                    <path d="M20 6 9 17l-5-5"/>
+                  </svg>
+                  Confirmada
+                </>
+              ) : (
+                "Confirmar Refeição"
+              )}
             </Button>
           )}
         </DialogFooter>

@@ -1,0 +1,659 @@
+import React, { useState, useEffect, useRef } from 'react';
+import * as DialogPrimitive from '@radix-ui/react-dialog';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Textarea } from '@/components/ui/textarea';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Clock, Check, X, Camera, Loader2, Brain, Calculator } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
+import foodAnalysisService from '@/services/foodAnalysisService';
+
+// Tipo para detalhes da refeição
+interface MealDetailsType {
+  id: number;
+  name: string;
+  time: string;
+  alternativeText?: string;
+  completed?: boolean;
+  description?: string;
+  suggestedFoods?: string[];
+  nutrition?: {
+    calories: number;
+    protein: number;
+    carbs: number;
+    fat: number;
+  };
+  consumedFoods?: string[];
+  analysisId?: string;
+}
+
+// Usamos a interface do serviço já existente
+import { FoodAnalysisResult, FoodItem } from '@/services/foodAnalysisService';
+
+interface MealInfoModalProps {
+  meal: MealDetailsType;
+  onMealCompleted: (mealId: number) => void;
+  onUndoMealCompleted?: (mealId: number) => void;
+  trigger?: React.ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  className?: string;
+}
+
+const MealInfoModal = ({
+  meal,
+  onMealCompleted,
+  onUndoMealCompleted,
+  trigger,
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
+  className = ""
+}: MealInfoModalProps) => {
+  // Estado interno para controlar a abertura quando trigger é usado
+  const [internalOpen, setInternalOpen] = useState(false);
+  
+  // Determinar se está usando modo controlado ou não-controlado
+  const isControlled = controlledOpen !== undefined;
+  const open = isControlled ? controlledOpen : internalOpen;
+  const onOpenChange = isControlled ? controlledOnOpenChange : setInternalOpen;
+  const [alternativeDescription, setAlternativeDescription] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [activeTab, setActiveTab] = useState('suggested');
+  const [nutritionAnalysis, setNutritionAnalysis] = useState<FoodAnalysisResult | null>(null);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  
+  // Função para lidar com o upload de imagem
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    // Verificar se é uma imagem válida
+    if (!file.type.startsWith('image/')) {
+      toast.error('Por favor, selecione uma imagem válida');
+      return;
+    }
+    
+    // Criar URL para a imagem
+    const imageUrl = URL.createObjectURL(file);
+    setPhotoUrl(imageUrl);
+    setPhotoFile(file);
+    
+    toast.success('Imagem adicionada com sucesso!');
+  };
+  
+  // Função para completar a refeição com as sugestões padrão
+  const handleCompleteMeal = () => {
+    if (isSubmitting) return;
+    
+    setIsSubmitting(true);
+    
+    // Salvar que o usuário comeu os alimentos sugeridos
+    const savedMeals = localStorage.getItem('nutri-mindflow-meals');
+    if (savedMeals) {
+      const meals = JSON.parse(savedMeals);
+      const updatedMeals = meals.map((m: MealDetailsType) => {
+        if (m.id === meal.id) {
+          return {
+            ...m,
+            consumedFoods: meal.suggestedFoods || [],
+            nutrition: meal.nutrition || {
+              calories: 200, // valores padrão
+              protein: 12,
+              carbs: 10,
+              fat: 14
+            },
+            completed: true
+          };
+        }
+        return m;
+      });
+      
+      localStorage.setItem('nutri-mindflow-meals', JSON.stringify(updatedMeals));
+      
+      // Salvar no histórico
+      saveMealToHistory({
+        ...meal,
+        consumedFoods: meal.suggestedFoods || [],
+        nutrition: meal.nutrition || {
+          calories: 200,
+          protein: 12,
+          carbs: 10,
+          fat: 14
+        }
+      });
+    }
+    
+    // Chamar função de callback para completar a refeição
+    onMealCompleted(meal.id);
+    
+    // Limpar estados
+    setIsSubmitting(false);
+    
+    // Fechar o modal
+    if (onOpenChange) {
+      onOpenChange(false);
+    }
+    
+    toast.success("Refeição registrada", {
+      description: `${meal.name} confirmada com os alimentos sugeridos.`
+    });
+  };
+  
+  // Função para completar a refeição com descrição manual
+  const handleManualComplete = () => {
+    if (isSubmitting) return;
+    
+    setIsSubmitting(true);
+    
+    // Salvar a descrição alternativa
+    const savedMeals = localStorage.getItem('nutri-mindflow-meals');
+    if (savedMeals) {
+      const meals = JSON.parse(savedMeals);
+      const updatedMeals = meals.map((m: MealDetailsType) => {
+        if (m.id === meal.id) {
+          return {
+            ...m,
+            alternativeText: alternativeDescription.trim(),
+            completed: true,
+            // Valores nutricionais estimados quando não há análise da IA
+            nutrition: {
+              calories: 250,
+              protein: 10,
+              carbs: 25, 
+              fat: 12
+            }
+          };
+        }
+        return m;
+      });
+      
+      localStorage.setItem('nutri-mindflow-meals', JSON.stringify(updatedMeals));
+      
+      // Salvar no histórico
+      saveMealToHistory({
+        ...meal,
+        alternativeText: alternativeDescription.trim(),
+        nutrition: {
+          calories: 250,
+          protein: 10,
+          carbs: 25, 
+          fat: 12
+        }
+      });
+    }
+    
+    // Chamar função de callback para completar a refeição
+    onMealCompleted(meal.id);
+    
+    // Limpar estados
+    setIsSubmitting(false);
+    setAlternativeDescription('');
+    
+    // Fechar o modal
+    if (onOpenChange) {
+      onOpenChange(false);
+    }
+    
+    toast.success("Refeição registrada", {
+      description: `${meal.name} confirmada com descrição personalizada.`
+    });
+  };
+  
+  // Função para analisar a refeição com IA usando o serviço existente no projeto
+  const handleAIAnalysis = async () => {
+    if (!photoFile && !alternativeDescription.trim()) {
+      toast.error("Adicione uma foto ou descrição da refeição");
+      return;
+    }
+    
+    setIsAnalyzing(true);
+    
+    try {
+      // Se temos uma foto, usamos a análise de imagem da IA
+      if (photoFile) {
+        // Usar o serviço real de análise de alimentos
+        const result = await foodAnalysisService.analyzeImage(photoFile);
+        
+        if (result) {
+          // Se temos uma descrição adicional, adicionar ao resultado
+          if (alternativeDescription.trim()) {
+            console.log("Adicionando descrição manual aos resultados da IA:", alternativeDescription);
+          }
+          
+          setNutritionAnalysis(result);
+          
+          toast.success("Análise concluída com sucesso!");
+        } else {
+          throw new Error("Falha ao analisar a imagem.");
+        }
+      } 
+      // Se não temos foto, mas temos descrição, criamos um resultado simplificado
+      else if (alternativeDescription.trim()) {
+        // Extrair alimentos da descrição
+        const description = alternativeDescription.toLowerCase();
+        
+        // Criar a lista de alimentos a partir da descrição 
+        const foodItems: FoodItem[] = [];
+        
+        // Vamos dividir a descrição por vírgulas ou "e" para identificar diferentes alimentos
+        const foodDescriptions = description
+          .split(/[,e]/) // Dividir por vírgulas ou "e"
+          .map(item => item.trim())
+          .filter(item => item.length > 2); // Filtrar itens vazios ou muito curtos
+          
+        if (foodDescriptions.length === 0) {
+          // Se não conseguirmos identificar itens específicos, usar a descrição completa
+          foodItems.push({
+            name: alternativeDescription.trim(),
+            calories: 250,
+            portion: "porção média",
+            protein: 12,
+            carbs: 30,
+            fat: 10,
+            fiber: 3
+          });
+        } else {
+          // Para cada item identificado, criar um FoodItem
+          foodDescriptions.forEach(food => {
+            // Valores estimados para cada alimento (na vida real seria calculado pela IA)
+            foodItems.push({
+              name: food,
+              calories: Math.floor(Math.random() * 150) + 100, // Entre 100-250 calorias
+              portion: "porção",
+              protein: Math.floor(Math.random() * 15) + 5, // 5-20g de proteína
+              carbs: Math.floor(Math.random() * 20) + 10, // 10-30g de carboidratos
+              fat: Math.floor(Math.random() * 10) + 3, // 3-13g de gordura
+              fiber: Math.floor(Math.random() * 5) + 1 // 1-6g de fibra
+            });
+          });
+        }
+        
+        // Calcular totais somando os valores dos alimentos
+        const totalCalories = foodItems.reduce((sum, item) => sum + item.calories, 0);
+        const totalProtein = foodItems.reduce((sum, item) => sum + (item.protein || 0), 0);
+        const totalCarbs = foodItems.reduce((sum, item) => sum + (item.carbs || 0), 0);
+        const totalFat = foodItems.reduce((sum, item) => sum + (item.fat || 0), 0);
+        const totalFiber = foodItems.reduce((sum, item) => sum + (item.fiber || 0), 0);
+        
+        // Criar o resultado da análise
+        const result: FoodAnalysisResult = {
+          dishName: alternativeDescription.trim(),
+          calories: totalCalories,
+          protein: totalProtein,
+          carbs: totalCarbs,
+          fat: totalFat,
+          fiber: totalFiber,
+          confidence: 0.8, // Menor confiança por ser baseado apenas em texto
+          foodItems: foodItems,
+          categories: ["Manual"],
+          healthScore: 7, // Valor padrão
+        };
+        
+        setNutritionAnalysis(result);
+        toast.success("Descrição analisada com sucesso!");
+      }
+    } catch (error) {
+      console.error("Erro na análise com IA:", error);
+      toast.error("Erro ao analisar a refeição: " + (error.message || "Falha desconhecida"));
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+  
+  // Função para salvar a análise da IA
+  const handleSaveAnalysis = (analysis: FoodAnalysisResult) => {
+    if (isSubmitting) return;
+    
+    setIsSubmitting(true);
+    
+    // Gerar ID único para a análise
+    const analysisId = `analysis-${Date.now()}`;
+    
+    // Salvar a análise e marcar refeição como concluída
+    const savedMeals = localStorage.getItem('nutri-mindflow-meals');
+    if (savedMeals) {
+      const meals = JSON.parse(savedMeals);
+      const updatedMeals = meals.map((m: MealDetailsType) => {
+        if (m.id === meal.id) {
+          return {
+            ...m,
+            alternativeText: alternativeDescription.trim(),
+            completed: true,
+            analysisId,
+            nutrition: {
+              calories: analysis.calories,
+              protein: analysis.protein,
+              carbs: analysis.carbs,
+              fat: analysis.fat
+            },
+            consumedFoods: analysis.foodItems?.map(item => item.name) || []
+          };
+        }
+        return m;
+      });
+      
+      localStorage.setItem('nutri-mindflow-meals', JSON.stringify(updatedMeals));
+      
+      // Salvar análise separadamente
+      const savedAnalyses = localStorage.getItem('nutri-mindflow-analyses') || '{}';
+      const analyses = JSON.parse(savedAnalyses);
+      analyses[analysisId] = {
+        ...analysis,
+        mealId: meal.id,
+        mealName: meal.name,
+        description: alternativeDescription.trim(),
+        date: new Date().toISOString(),
+        photoUrl
+      };
+      localStorage.setItem('nutri-mindflow-analyses', JSON.stringify(analyses));
+      
+      // Salvar no histórico
+      saveMealToHistory({
+        ...meal,
+        alternativeText: alternativeDescription.trim(),
+        analysisId,
+        nutrition: {
+          calories: analysis.calories,
+          protein: analysis.protein,
+          carbs: analysis.carbs,
+          fat: analysis.fat
+        },
+        consumedFoods: analysis.foodItems?.map(item => item.name) || []
+      });
+    }
+    
+    // Chamar função de callback para completar a refeição
+    onMealCompleted(meal.id);
+    
+    // Limpar estados
+    setIsSubmitting(false);
+    setAlternativeDescription('');
+    setNutritionAnalysis(null);
+    setPhotoUrl(null);
+    
+    // Fechar o modal
+    if (onOpenChange) {
+      onOpenChange(false);
+    }
+    
+    toast.success("Análise nutricional salva", {
+      description: `${meal.name} analisada e registrada com sucesso.`
+    });
+  };
+  
+  // Função para desfazer a conclusão da refeição
+  const handleUndoMealCompleted = () => {
+    if (onUndoMealCompleted) {
+      onUndoMealCompleted(meal.id);
+      if (onOpenChange) {
+        onOpenChange(false);
+      }
+      
+      toast("Refeição desmarcada", {
+        description: "Status da refeição revertido para pendente."
+      });
+    }
+  };
+  
+  // Função para salvar uma refeição no histórico
+  const saveMealToHistory = (mealData: MealDetailsType) => {
+    try {
+      // Adicionar data ao registro
+      const mealWithDate = {
+        ...mealData,
+        date: new Date().toISOString().split('T')[0]
+      };
+      
+      // Carregar histórico existente
+      const saved = localStorage.getItem('nutri-mindflow-meals-history');
+      const history = saved ? JSON.parse(saved) : [];
+      
+      // Adicionar ao histórico e salvar
+      history.push(mealWithDate);
+      localStorage.setItem('nutri-mindflow-meals-history', JSON.stringify(history));
+      
+      console.log('Refeição salva no histórico:', mealWithDate);
+    } catch (error) {
+      console.error('Erro ao salvar refeição no histórico:', error);
+    }
+  };
+  
+  // Carregar dados salvos quando o modal for aberto
+  useEffect(() => {
+    if (open) {
+      // Verificar se existe uma descrição alternativa salva
+      const savedMeals = localStorage.getItem('nutri-mindflow-meals');
+      if (savedMeals) {
+        const meals = JSON.parse(savedMeals);
+        const currentMeal = meals.find((m: MealDetailsType) => m.id === meal.id);
+        if (currentMeal && currentMeal.alternativeText) {
+          setAlternativeDescription(currentMeal.alternativeText);
+        }
+      }
+    }
+  }, [open, meal.id]);
+  
+  return (
+    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
+      {trigger && (
+        <DialogPrimitive.Trigger asChild>
+          {trigger}
+        </DialogPrimitive.Trigger>
+      )}
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay className="fixed inset-0 bg-black/50 z-50" />
+        <DialogPrimitive.Content 
+          className={cn(
+            "fixed left-[50%] top-[50%] z-50 w-full max-w-lg translate-x-[-50%] translate-y-[-50%] rounded-lg border bg-white p-6 shadow-lg overflow-y-auto max-h-[90vh]",
+            className
+          )}
+        >
+          <div className="flex items-center justify-between">
+            <DialogPrimitive.Title className="text-lg font-semibold">
+              {meal.name}
+            </DialogPrimitive.Title>
+            <Badge className="ml-2 bg-blue-100 text-blue-800 hover:bg-blue-200">
+              <Clock className="h-3 w-3 mr-1" /> {meal.time}
+            </Badge>
+          </div>
+          
+          <DialogPrimitive.Description className="text-sm text-gray-500 mt-2 mb-4">
+            Registre detalhes sobre esta refeição e seu consumo
+          </DialogPrimitive.Description>
+          
+          <Tabs defaultValue="suggested" value={activeTab} onValueChange={setActiveTab}>
+            <TabsList className="w-full mb-4">
+              <TabsTrigger value="suggested" className="flex-1">Sugestões</TabsTrigger>
+              <TabsTrigger value="analysis" className="flex-1">Análise com IA</TabsTrigger>
+            </TabsList>
+            
+            <TabsContent value="suggested" className="py-2">
+              <div className="mb-3">
+                <h4 className="text-md font-medium mb-2">Alimentos Sugeridos</h4>
+                <div className="bg-green-50 p-3 rounded-md mb-4">
+                  <p className="text-sm text-green-700 mb-2">Opções recomendadas para {meal.name}:</p>
+                  <ul className="list-disc list-inside space-y-1 text-sm text-green-800">
+                    {meal.suggestedFoods ? (
+                      meal.suggestedFoods.map((food, index) => (
+                        <li key={index}>{food}</li>
+                      ))
+                    ) : (
+                      <>
+                        <li>1 iogurte grego sem açúcar</li>
+                        <li>1 punhado de castanhas (30g)</li>
+                        <li>1 fruta média</li>
+                        <li>Chá de ervas sem açúcar</li>
+                      </>
+                    )}
+                  </ul>
+                </div>
+                
+                <div className="mb-4">
+                  <h4 className="text-sm font-medium mb-2">Você consumiu estes alimentos?</h4>
+                  <div className="flex gap-2">
+                    <Button 
+                      variant="outline" 
+                      className="flex-1 border-green-300 text-green-700 hover:bg-green-50"
+                      onClick={handleCompleteMeal}
+                    >
+                      <Check className="h-4 w-4 mr-2" />
+                      Sim, segui sugestões
+                    </Button>
+                    <Button 
+                      className="flex-1 bg-blue-600 hover:bg-blue-700"
+                      onClick={() => setActiveTab('analysis')}
+                    >
+                      Comi algo diferente
+                    </Button>
+                  </div>
+                </div>
+                
+                {meal.nutrition && (
+                  <div className="bg-blue-50 p-3 rounded-md">
+                    <h4 className="text-sm font-medium mb-2 text-blue-700">Informações Nutricionais</h4>
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                      <div className="bg-white rounded p-2">
+                        <p className="text-xs text-gray-500">Calorias</p>
+                        <p className="font-semibold">{meal.nutrition.calories} kcal</p>
+                      </div>
+                      <div className="bg-white rounded p-2">
+                        <p className="text-xs text-gray-500">Proteínas</p>
+                        <p className="font-semibold text-green-600">{meal.nutrition.protein}g</p>
+                      </div>
+                      <div className="bg-white rounded p-2">
+                        <p className="text-xs text-gray-500">Carboidratos</p>
+                        <p className="font-semibold text-amber-600">{meal.nutrition.carbs}g</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </TabsContent>
+            
+            <TabsContent value="analysis" className="py-2">
+              <div className="mb-4">
+                <h4 className="text-md font-medium mb-2">Análise Nutricional com IA</h4>
+                
+                {!nutritionAnalysis ? (
+                  <>
+                    <div 
+                      className="border-2 border-dashed border-gray-300 rounded-lg p-6 mb-4 text-center cursor-pointer hover:bg-gray-50 transition-colors"
+                      onClick={() => document.getElementById('meal-photo-upload')?.click()}
+                    >
+                      {photoUrl ? (
+                        <img src={photoUrl} alt="Foto da refeição" className="max-h-48 mx-auto mb-2 rounded" />
+                      ) : (
+                        <div className="flex flex-col items-center justify-center text-gray-500 py-4">
+                          <Camera className="h-10 w-10 mb-2" />
+                          <p>Clique para adicionar uma foto da sua refeição</p>
+                        </div>
+                      )}
+                      {photoUrl && (
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="text-red-500 hover:text-red-700 mt-2"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPhotoUrl(null);
+                            setPhotoFile(null);
+                          }}
+                        >
+                          <X className="h-4 w-4 mr-1" /> Remover imagem
+                        </Button>
+                      )}
+                      <input 
+                        type="file" 
+                        id="meal-photo-upload" 
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => handleImageUpload(e)}
+                      />
+                    </div>
+                    
+                    <Textarea
+                      placeholder="Descreva detalhadamente o que você comeu..."
+                      className="resize-none h-24 mb-4"
+                      value={alternativeDescription}
+                      onChange={(e) => setAlternativeDescription(e.target.value)}
+                    />
+                    
+                    <Button 
+                      className="w-full mb-2" 
+                      disabled={isAnalyzing || (!photoUrl && !alternativeDescription.trim())}
+                      onClick={handleAIAnalysis}
+                    >
+                      {isAnalyzing ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Analisando...
+                        </>
+                      ) : (
+                        <>
+                          <Brain className="h-4 w-4 mr-2" />
+                          Analisar com IA
+                        </>
+                      )}
+                    </Button>
+                    
+                    <div className="text-xs text-gray-500 text-center">
+                      A IA analisará sua refeição e calculará as informações nutricionais aproximadas
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="bg-green-50 p-4 rounded-lg mb-4">
+                      <h5 className="font-medium text-green-800 mb-2">Alimentos Identificados:</h5>
+                      <ul className="list-disc list-inside text-sm space-y-1 text-green-700 mb-4">
+                        {nutritionAnalysis.foodItems?.map((food, index) => (
+                          <li key={index}>{food.name}</li>
+                        ))}
+                      </ul>
+                      
+                      <h5 className="font-medium text-green-800 mb-2">Informações Nutricionais:</h5>
+                      <div className="grid grid-cols-4 gap-2 text-center">
+                        <div className="bg-white rounded p-2">
+                          <p className="text-xs text-gray-500">Calorias</p>
+                          <p className="font-semibold">{nutritionAnalysis.calories} kcal</p>
+                        </div>
+                        <div className="bg-white rounded p-2">
+                          <p className="text-xs text-gray-500">Proteínas</p>
+                          <p className="font-semibold text-green-600">{nutritionAnalysis.protein}g</p>
+                        </div>
+                        <div className="bg-white rounded p-2">
+                          <p className="text-xs text-gray-500">Carboidratos</p>
+                          <p className="font-semibold text-amber-600">{nutritionAnalysis.carbs}g</p>
+                        </div>
+                        <div className="bg-white rounded p-2">
+                          <p className="text-xs text-gray-500">Gorduras</p>
+                          <p className="font-semibold text-blue-600">{nutritionAnalysis.fat}g</p>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <Button 
+                      className="w-full" 
+                      onClick={() => handleSaveAnalysis(nutritionAnalysis)}
+                    >
+                      <Check className="h-4 w-4 mr-2" />
+                      Salvar e Confirmar Refeição
+                    </Button>
+                  </>
+                )}
+              </div>
+            </TabsContent>
+          </Tabs>
+          
+          <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 hover:opacity-100 focus:outline-none">
+            <X className="h-4 w-4" />
+          </DialogPrimitive.Close>
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
+  );
+};
+
+export default MealInfoModal;

@@ -85,6 +85,8 @@ const analyzeWithOpenAIBase64 = async (
       throw new Error('OpenAI API key não configurada');
     }
     
+    console.log('OpenAI API Key: ', apiKey.substring(0, 15) + '...');
+    
     const prompt = `Analise esta imagem de comida (${foodName || 'refeição'}) e forneça:
     1. Uma descrição detalhada do que você vê (máximo 2 frases)
     2. Informações nutricionais aproximadas:
@@ -103,7 +105,7 @@ const analyzeWithOpenAIBase64 = async (
         'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: 'gpt-4-vision-preview',
+        model: 'gpt-4o',
         messages: [
           {
             role: 'user',

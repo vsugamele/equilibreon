@@ -78,22 +78,92 @@ const CalorieTracker2: React.FC<CalorieTrackerProps> = ({ className }) => {
     targetCalories: 2500
   });
   
-  // Escutar eventos de atualização de calorias de outros componentes
+  // Carregar valores iniciais e escutar eventos de atualização
   useEffect(() => {
-    const handleCaloriesUpdated = (e: any) => {
-      const { calories } = e.detail;
+    // Forçar carregamento inicial das calorias do localStorage
+    const storedCalories = localStorage.getItem('nutri-mindflow-calories');
+    if (storedCalories) {
+      const calories = parseInt(storedCalories);
       setCalorieData(prev => ({
         ...prev,
         consumedCalories: calories
       }));
+      console.log('CalorieTracker2: Calorias carregadas do localStorage:', calories);
+    }
+
+    const handleCaloriesUpdated = (e: any) => {
+      console.log('CalorieTracker2: Evento calories-updated recebido:', e.detail);
+      const { calories, operation } = e.detail;
+      
+      // Se a operação for 'add', somar as calorias ao invés de substituir
+      if (operation === 'add') {
+        console.log('CalorieTracker2: Somando calorias:', calories);
+        setCalorieData(prev => ({
+          ...prev,
+          consumedCalories: prev.consumedCalories + calories
+        }));
+        // Salvar no localStorage
+        saveLocalCalories(calorieData.consumedCalories + calories);
+      } else {
+        // Modo antigo (substituir)
+        console.log('CalorieTracker2: Substituindo calorias para:', calories);
+        setCalorieData(prev => ({
+          ...prev,
+          consumedCalories: calories
+        }));
+      }
     };
     
-    // Registrar ouvinte de evento
-    window.addEventListener('calories-updated', handleCaloriesUpdated);
+    const handleMealAdded = (e: any) => {
+      console.log('CalorieTracker2: Evento meal-added recebido:', e.detail);
+      const { mealCalories } = e.detail;
+      setCalorieData(prev => ({
+        ...prev,
+        consumedCalories: prev.consumedCalories + mealCalories
+      }));
+    };
     
-    // Limpar ouvinte ao desmontar
+    // Novo handler para o evento add-calories
+    const handleAddCalories = (e: any) => {
+      console.log('CalorieTracker2: Evento add-calories recebido:', e.detail);
+      const { calories, description } = e.detail;
+      
+      // Atualizar o estado local
+      setCalorieData(prev => {
+        const newTotal = prev.consumedCalories + calories;
+        
+        // Atualizar localStorage
+        localStorage.setItem('nutri-mindflow-calories', newTotal.toString());
+        
+        // Emitir evento para sincronizar outros componentes
+        window.dispatchEvent(new CustomEvent('calories-updated', {
+          detail: { calories: newTotal }
+        }));
+        
+        return {
+          ...prev,
+          consumedCalories: newTotal
+        };
+      });
+      
+      // Mostrar notificação
+      toast({
+        title: "Calorias adicionadas",
+        description: `${calories} calorias de ${description} foram adicionadas.`,
+        variant: "default"
+      });
+    };
+    
+    // Registrar ouvintes de eventos
+    window.addEventListener('calories-updated', handleCaloriesUpdated);
+    window.addEventListener('meal-added', handleMealAdded);
+    window.addEventListener('add-calories', handleAddCalories);
+    
+    // Limpar ouvintes ao desmontar
     return () => {
       window.removeEventListener('calories-updated', handleCaloriesUpdated);
+      window.removeEventListener('meal-added', handleMealAdded);
+      window.removeEventListener('add-calories', handleAddCalories);
     };
   }, []);
   
@@ -425,29 +495,20 @@ const CalorieTracker2: React.FC<CalorieTrackerProps> = ({ className }) => {
 
   return (
     <Card className={`bg-white rounded-xl shadow-sm overflow-hidden ${className}`}>
-      <div className="p-4">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <BarChart className="h-5 w-5 text-green-600" />
-            <div className="font-semibold">Calorias</div>
+      <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-200">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center">
+            <BarChart className="h-5 w-5 text-green-500 mr-2" />
+            <h3 className="font-medium">Calorias</h3>
           </div>
-          <div className="flex items-center gap-2">
-            <Button 
-              onClick={resetCalories}
+          <div className="flex space-x-2">
+            <Button
               variant="outline"
               size="sm"
-              className="bg-white border border-gray-200 hover:bg-gray-100 shadow-sm text-gray-800 text-xs"
+              onClick={resetCalories}
+              className="text-xs h-8"
             >
-              <RefreshCw className="mr-1 h-3 w-3" />
-              Zerar
-            </Button>
-            
-            <Button 
-              onClick={() => setShowModal(true)}
-              className="bg-green-500 text-white hover:bg-green-600 text-xs whitespace-nowrap"
-              size="sm"
-            >
-              Adicionar
+              <RefreshCw className="mr-1 h-3 w-3" /> Zerar
             </Button>
           </div>
         </div>

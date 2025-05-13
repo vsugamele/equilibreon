@@ -170,81 +170,32 @@ const CalorieAnalyzer: React.FC<CalorieAnalyzerProps> = ({ presetMealType, onAna
           setState(prev => ({ 
             ...prev, 
             imagePreview: event.target.result as string,
-            selectedFile: file
+            selectedFile: file,
+            isLoading: false
           }));
           console.log('Preview da imagem carregado com sucesso');
+          
+          // Mostrar mensagem para o usuário
+          toast.message("Foto selecionada com sucesso", {
+            description: "Clique em 'Analisar Refeição' para continuar"
+          });
         }
       };
       reader.onerror = () => {
-        throw new Error('Erro ao ler o arquivo de imagem');
+        setState(prev => ({
+          ...prev,
+          error: 'Erro ao ler o arquivo de imagem',
+          isLoading: false
+        }));
       };
       reader.readAsDataURL(file);
-      
-      // Analisar a imagem para obter informações nutricionais
-      setState(prev => ({ ...prev, isAnalyzing: true }));
-      // Usar o toast.message para compatibilidade com a API do sonner
-      toast.message("Analisando imagem", {
-        description: "A IA está analisando sua imagem. Isso pode levar alguns segundos..."
-      });
-      
-      const result = await foodAnalysisService.analyzeImage(file);
-      
-      // Converter para o formato NutritionData para compatibilidade
-      const nutritionData: NutritionData = {
-        foodName: result.foodName,
-        dishName: result.dishName,
-        calories: result.calories,
-        protein: result.protein,
-        carbs: result.carbs,
-        fat: result.fat,
-        fiber: result.fiber || 0,
-        sugar: result.sugar,
-        sodium: result.sodium,
-        imageUrl: result.imageUrl,
-        confidence: result.confidence || 0.8,
-        // Campos adicionais para o formato local
-        analysisSummary: `Análise de ${result.dishName || result.foodName} com pontuação de saúde ${result.healthScore}/10`,
-        userRecommendations: result.userRecommendations || [],
-        dietaryTags: result.dietaryTags || [],
-        healthScore: result.healthScore || 5,
-        analyzedAt: new Date().toISOString(), // Usando a data atual
-        foodItems: result.foodItems || [],
-        categories: result.categories || []
-      };
-      
-      // Atualizar estado com resultados
-      setState(prev => ({
-        ...prev, 
-        nutritionData,
-        isLoading: false,
-        isAnalyzing: false,
-        analysisHistory: [nutritionData, ...prev.analysisHistory.slice(0, 9)]
-      }));
-      
-      // Salvar histórico no localStorage
-      try {
-        localStorage.setItem('nutritionAnalysisHistory', 
-          JSON.stringify([nutritionData, ...state.analysisHistory.slice(0, 9)]))
-      } catch (storageError) {
-        console.error('Erro ao salvar histórico:', storageError);
-      }
-      
-      toast.success("Análise concluída", {
-        description: "Sua imagem foi analisada com sucesso!"
-      });
-      
     } catch (error) {
       console.error('Erro ao processar imagem:', error);
-      setState(prev => ({ 
-        ...prev, 
-        isLoading: false, 
-        isAnalyzing: false,
-        error: error instanceof Error ? error.message : 'Erro desconhecido ao processar a imagem'
+      setState(prev => ({
+        ...prev,
+        error: error instanceof Error ? error.message : 'Erro ao processar a imagem',
+        isLoading: false
       }));
-      
-      toast.error("Erro na análise", {
-        description: error instanceof Error ? error.message : 'Erro desconhecido ao processar a imagem'
-      });
     }
   };
 
@@ -305,7 +256,8 @@ const CalorieAnalyzer: React.FC<CalorieAnalyzerProps> = ({ presetMealType, onAna
   };
 
   const handleAnalyzeImage = async () => {
-    if (!state.selectedFile) {
+    const { selectedFile } = state;
+    if (!selectedFile) {
       setState(prev => ({
         ...prev,
         error: 'Por favor, selecione uma imagem para análise.'
@@ -348,7 +300,7 @@ const CalorieAnalyzer: React.FC<CalorieAnalyzerProps> = ({ presetMealType, onAna
       }
       
       // Chamar a API de análise
-      const response = await foodAnalysisService.analyzeImage(state.selectedFile);
+      const response = await foodAnalysisService.analyzeImage(selectedFile);
       
       // Mapear a resposta para o formato esperado pelo componente
       const nutritionData: NutritionData = {
@@ -373,6 +325,17 @@ const CalorieAnalyzer: React.FC<CalorieAnalyzerProps> = ({ presetMealType, onAna
         categories: response.categories || []
       };
       
+      // Salvar os dados da análise para uso pelo modal de confirmação
+      localStorage.setItem('current-meal-analysis', JSON.stringify({
+        foodItems: nutritionData.foodItems || [],
+        calories: nutritionData.calories || 0,
+        protein: nutritionData.protein || 0,
+        carbs: nutritionData.carbs || 0,
+        fat: nutritionData.fat || 0,
+        description: nutritionData.dishName || nutritionData.foodName,
+        timestamp: new Date().toISOString()
+      }));
+      
       // Comparar com a refeição planejada se houver presetMealType
       let comparisonResult = null;
       if (presetMealType) {
@@ -396,6 +359,15 @@ const CalorieAnalyzer: React.FC<CalorieAnalyzerProps> = ({ presetMealType, onAna
         }
       }
       
+      // Salvar histórico no localStorage
+      try {
+        const currentHistory = state.analysisHistory || [];
+        localStorage.setItem('nutritionAnalysisHistory', 
+          JSON.stringify([nutritionData, ...currentHistory.slice(0, 9)]));
+      } catch (storageError) {
+        console.error('Erro ao salvar histórico:', storageError);
+      }
+      
       // Atualizar o estado com os resultados da análise
       setState(prev => ({
         ...prev,
@@ -403,7 +375,8 @@ const CalorieAnalyzer: React.FC<CalorieAnalyzerProps> = ({ presetMealType, onAna
         isAnalyzing: false,
         analysisStatus: 'Análise concluída!',
         analysisProgress: 100,
-        comparisonResult
+        comparisonResult,
+        analysisHistory: [nutritionData, ...prev.analysisHistory.slice(0, 9)]
       }));
       
       // Notificar o componente pai se callback existir
@@ -568,12 +541,9 @@ const CalorieAnalyzer: React.FC<CalorieAnalyzerProps> = ({ presetMealType, onAna
                 >
                   <ImageIcon className="h-10 w-10" />
                   <span className="text-base font-medium">Selecionar da Galeria</span>
-                  <p className="text-xs text-purple-600 dark:text-purple-300">Escolha uma foto de comida para análise</p>
                 </Button>
                 
-                <p className="text-sm text-gray-500 dark:text-gray-400 italic mt-4">
-                  Dica: Para melhores resultados, inclua palavras-chave do alimento no nome do arquivo (ex: "arroz.jpg", "salada.jpg", "frango.jpg").
-                </p>
+                {/* Dica removida */}
               </div>
             </div>
             
@@ -583,6 +553,46 @@ const CalorieAnalyzer: React.FC<CalorieAnalyzerProps> = ({ presetMealType, onAna
                 {state.error}
               </div>
             )}
+          </div>
+        ) : !state.nutritionData && state.imagePreview ? (
+          <div className="mt-4 space-y-4">
+            <div className="relative rounded-lg overflow-hidden">
+              <img 
+                src={state.imagePreview} 
+                alt="Preview da refeição" 
+                className="w-full h-auto max-h-[400px] object-contain rounded-lg border border-gray-200" 
+              />
+              
+              <div className="mt-4 flex justify-center">
+                <Button 
+                  onClick={handleAnalyzeImage} 
+                  className="bg-purple-600 hover:bg-purple-700 text-white font-medium py-2 px-4 rounded-md flex items-center"
+                  disabled={state.isAnalyzing}
+                >
+                  {state.isAnalyzing ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Analisando...
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="mr-2 h-4 w-4" />
+                      Analisar Refeição
+                    </>
+                  )}
+                </Button>
+              </div>
+              
+              <div className="mt-3 flex justify-center">
+                <Button
+                  variant="outline"
+                  onClick={() => setState(prev => ({ ...prev, imagePreview: null, selectedFile: null }))}
+                  className="text-sm"
+                >
+                  Escolher outra imagem
+                </Button>
+              </div>
+            </div>
           </div>
         ) : !state.nutritionData && (
           <div className="mt-4 space-y-4">
@@ -705,19 +715,72 @@ const CalorieAnalyzer: React.FC<CalorieAnalyzerProps> = ({ presetMealType, onAna
                     const calories = state.nutritionData?.calories || 0;
                     if (calories <= 0) return;
                     
-                    // Obter o valor atual do localStorage
-                    const storedValue = localStorage.getItem('nutri-mindflow-calories') || '0';
-                    const currentValue = parseInt(storedValue);
-                    
-                    // Adicionar as novas calorias
-                    const newValue = currentValue + calories;
-                    
-                    // Salvar no localStorage
-                    localStorage.setItem('nutri-mindflow-calories', newValue.toString());
+                    // Adicionar calorias usando as funções locais
+                    try {
+                      // Obter o valor atual
+                      const currentCalories = getLocalCalories();
+                      
+                      // Adicionar as novas calorias
+                      const newCalories = currentCalories + calories;
+                      
+                      // Salvar o novo valor
+                      saveLocalCalories(newCalories);
+                      
+                      console.log(`[CalorieAnalyzer] Adicionadas ${calories} calorias ao contador. Novo total: ${newCalories}`);
+                      
+                      // Marcar que as calorias já foram adicionadas para evitar duplicação
+                      localStorage.setItem('calories-already-added', 'true');
+                      
+                      // Emitir um evento para notificar outros componentes da mudança
+                      const event = new CustomEvent('calories-updated', { 
+                        detail: { calories: newCalories, added: calories } 
+                      });
+                      window.dispatchEvent(event);
+                    } catch (calorieError) {
+                      console.error('[CalorieAnalyzer] Erro ao adicionar calorias:', calorieError);
+                    }
                     
                     // Gerar descrição dos alimentos detectados
                     const foodItems = state.nutritionData?.foodItems || [];
                     const foodDescription = foodItems.map(item => item.name).join(', ');
+                    
+                    // IMPORTANTE: Salvar os dados da análise atual para uso posterior
+                    if (state.nutritionData) {
+                      try {
+                        // Guardar os dados da análise para que possam ser usados na confirmação da refeição
+                        const analysisData = {
+                          foodItems: state.nutritionData.foodItems || [],
+                          calories: state.nutritionData.calories || 0,
+                          protein: state.nutritionData.protein || 0,
+                          carbs: state.nutritionData.carbs || 0,
+                          fat: state.nutritionData.fat || 0,
+                          description: foodDescription || state.nutritionData.dishName || state.nutritionData.foodName,
+                          timestamp: new Date().toISOString(),
+                          // IMPORTANTE: Marcar explicitamente como análise de IA
+                          isAIAnalysis: true,
+                          analysisSummary: state.nutritionData.analysisSummary
+                        };
+                        
+                        // Salvar no localStorage para uso em outros componentes
+                        localStorage.setItem('current-meal-analysis', JSON.stringify(analysisData));
+                        
+                        // Salvar uma cópia separada para depuração e rastreamento
+                        localStorage.setItem('last-ai-analysis', JSON.stringify({
+                          ...analysisData,
+                          savedAt: new Date().toISOString()
+                        }));
+                        
+                        // Disparar evento personalizado para notificar outros componentes sobre a análise
+                        const event = new CustomEvent('ai-analysis-completed', {
+                          detail: { ...analysisData }
+                        });
+                        window.dispatchEvent(event);
+                        
+                        console.log('Dados da análise de IA salvos para confirmação da refeição:', analysisData);
+                      } catch (storageError) {
+                        console.error('Erro ao salvar dados da análise:', storageError);
+                      }
+                    }
                     
                     // Encontrar o textarea do "Comeu algo diferente?"
                     const alternativeTextArea = document.querySelector('textarea[placeholder="Descreva o que você comeu..."]') as HTMLTextAreaElement;
@@ -731,45 +794,54 @@ const CalorieAnalyzer: React.FC<CalorieAnalyzerProps> = ({ presetMealType, onAna
                       console.log('Campo alternativo preenchido com:', foodDescription);
                     }
                     
-                    // Fechar o modal/drawer - tentar com diferentes abordagens
-                    // 1. Tentar encontrar o botão de fechar por vários seletores comuns
-                    let closeButton = document.querySelector('button[aria-label="Close"]') as HTMLButtonElement;
-                    if (!closeButton) closeButton = document.querySelector('.close-button') as HTMLButtonElement;
-                    if (!closeButton) closeButton = document.querySelector('[data-dismiss="modal"]') as HTMLButtonElement;
-                    if (!closeButton) closeButton = document.querySelector('.modal button:first-of-type') as HTMLButtonElement;
-                    
-                    // 2. Se encontrou algum botão, clicar nele
-                    if (closeButton) {
-                      closeButton.click();
-                      console.log('Botão de fechar encontrado e clicado');
-                    } else {
-                      console.log('Botão de fechar não encontrado, tentando abordagem alternativa');
+                    // Acionar o botão de confirmar refeição automaticamente
+                    setTimeout(() => {
+                      // Buscar o botão "Confirmar Refeição"
+                      const confirmButton = document.querySelector('button:has(.h-4.w-4.mr-2)') as HTMLButtonElement;
+                      // Ou usando o texto específico
+                      const allButtons = Array.from(document.querySelectorAll('button'));
+                      const confirmButtonByText = allButtons.find(button => 
+                        button.textContent?.includes('Confirmar Refeição'));
                       
-                      // 3. Forçar fechamento via ESC
-                      const escEvent = new KeyboardEvent('keydown', {
-                        key: 'Escape',
-                        code: 'Escape',
-                        keyCode: 27,
-                        which: 27,
-                        bubbles: true
-                      });
-                      document.dispatchEvent(escEvent);
-                    }
+                      // Clicar no botão encontrado
+                      if (confirmButton) {
+                        console.log('Botão de confirmar refeição encontrado e clicado');
+                        confirmButton.click();
+                      } else if (confirmButtonByText) {
+                        console.log('Botão de confirmar refeição encontrado pelo texto e clicado');
+                        confirmButtonByText.click();
+                      } else {
+                        console.log('Botão de confirmar refeição não encontrado');
+                        
+                        // Se não encontrou o botão, tenta fechar o modal
+                        let closeButton = document.querySelector('button[aria-label="Close"]') as HTMLButtonElement;
+                        if (!closeButton) closeButton = document.querySelector('.close-button') as HTMLButtonElement;
+                        if (!closeButton) closeButton = document.querySelector('[data-dismiss="modal"]') as HTMLButtonElement;
+                        if (!closeButton) closeButton = document.querySelector('.modal button:first-of-type') as HTMLButtonElement;
+                        
+                        if (closeButton) {
+                          closeButton.click();
+                          console.log('Botão de fechar encontrado e clicado');
+                        } else {
+                          // Forçar fechamento via ESC
+                          const escEvent = new KeyboardEvent('keydown', {
+                            key: 'Escape',
+                            code: 'Escape',
+                            keyCode: 27,
+                            which: 27,
+                            bubbles: true
+                          });
+                          document.dispatchEvent(escEvent);
+                        }
+                      }
+                    }, 300); // Delay para garantir que os dados foram preenchidos
                     
                     // 4. Adicionar flag para evitar duplicação de calorias
                     localStorage.setItem('calories-already-added', 'true');
                     
-                    // 5. Após um curto período, tentar navegar para a página principal
-                    setTimeout(() => {
-                      const modal = document.querySelector('.modal') as HTMLElement;
-                      if (modal && modal.style.display !== 'none') {
-                        window.location.href = '/';
-                      }
-                    }, 300);
-                    
                     // Mensagem de sucesso
                     toast.success('Calorias adicionadas!', {
-                      description: `${calories} calorias foram adicionadas ao seu contador.`
+                      description: `${calories} calorias foram adicionadas ao seu contador e a refeição foi confirmada.`
                     });
                   } catch (error) {
                     console.error('Erro ao adicionar calorias:', error);

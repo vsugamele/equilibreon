@@ -1,0 +1,158 @@
+import React, { useState, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter
+} from "@/components/ui/dialog";
+import { Badge } from '@/components/ui/badge';
+import { Textarea } from '@/components/ui/textarea';
+import { Clock, Check, X } from 'lucide-react';
+
+// Tipo para detalhes da refeição
+interface MealDetailsType {
+  id: number;
+  name: string;
+  time: string;
+  alternativeText?: string;
+  completed?: boolean;
+}
+
+interface MealDetailsModalProps {
+  meal: MealDetailsType;
+  onMealCompleted: (mealId: number) => void;
+  onUndoMealCompleted?: (mealId: number) => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  className?: string;
+}
+
+const MealDetailsModal: React.FC<MealDetailsModalProps> = ({ 
+  meal, 
+  onMealCompleted, 
+  onUndoMealCompleted, 
+  open, 
+  onOpenChange, 
+  className = "" 
+}) => {
+  const [alternativeDescription, setAlternativeDescription] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  // Função para completar a refeição
+  const handleCompleteMeal = () => {
+    if (isSubmitting) return;
+    
+    setIsSubmitting(true);
+    
+    // Se tiver descrição alternativa, salvar
+    if (alternativeDescription.trim()) {
+      const savedMeals = localStorage.getItem('nutri-mindflow-meals');
+      if (savedMeals) {
+        const meals = JSON.parse(savedMeals);
+        const updatedMeals = meals.map((m: MealDetailsType) => {
+          if (m.id === meal.id) {
+            return {
+              ...m,
+              alternativeText: alternativeDescription.trim(),
+              completed: true
+            };
+          }
+          return m;
+        });
+        
+        localStorage.setItem('nutri-mindflow-meals', JSON.stringify(updatedMeals));
+      }
+    }
+    
+    // Chamar função de callback para completar a refeição
+    onMealCompleted(meal.id);
+    
+    // Limpar estados
+    setIsSubmitting(false);
+    setAlternativeDescription('');
+    
+    // Fechar o modal
+    onOpenChange(false);
+  };
+  
+  // Função para desfazer a conclusão da refeição
+  const handleUndoMealCompleted = () => {
+    if (onUndoMealCompleted) {
+      onUndoMealCompleted(meal.id);
+      onOpenChange(false);
+    }
+  };
+  
+  // Carregar dados salvos quando o modal for aberto
+  useEffect(() => {
+    if (open) {
+      // Verificar se existe uma descrição alternativa salva
+      const savedMeals = localStorage.getItem('nutri-mindflow-meals');
+      if (savedMeals) {
+        const meals = JSON.parse(savedMeals);
+        const currentMeal = meals.find((m: MealDetailsType) => m.id === meal.id);
+        if (currentMeal && currentMeal.alternativeText) {
+          setAlternativeDescription(currentMeal.alternativeText);
+        }
+      }
+    }
+  }, [open, meal.id, meal.name]);
+  
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className={`max-w-md ${className}`}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center">
+            <div className="flex-1">{meal.name}</div>
+            <Badge className="ml-2 bg-blue-100 text-blue-800 hover:bg-blue-200">
+              <Clock className="h-3 w-3 mr-1" /> {meal.time}
+            </Badge>
+          </DialogTitle>
+          <DialogDescription>
+            Registre detalhes sobre esta refeição
+          </DialogDescription>
+        </DialogHeader>
+        
+        <div className="py-4">
+          <div className="mb-2 text-sm font-medium">O que você comeu?</div>
+          <Textarea
+            placeholder="Descreva o que você comeu nesta refeição..."
+            className="resize-none h-24"
+            value={alternativeDescription}
+            onChange={(e) => setAlternativeDescription(e.target.value)}
+          />
+        </div>
+        
+        <DialogFooter className="gap-2 sm:gap-0">
+          {meal.completed && onUndoMealCompleted && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleUndoMealCompleted}
+              className="w-full sm:w-auto"
+            >
+              <X className="h-4 w-4 mr-2" />
+              Desfazer Conclusão
+            </Button>
+          )}
+          
+          {!meal.completed && (
+            <Button
+              type="button"
+              onClick={handleCompleteMeal}
+              className="w-full sm:w-auto"
+            >
+              <Check className="h-4 w-4 mr-2" />
+              Confirmar Refeição
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+export default MealDetailsModal;

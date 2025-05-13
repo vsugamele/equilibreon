@@ -12,6 +12,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { processExamAnalysis, analyzeExamWithAI, saveExamAnalysis, COMMON_EXAM_TYPES } from '@/services/examAnalysisService';
 import { extractTextFromPDF } from '@/utils/pdfParser';
+import FormattedAnalysisText from '@/components/common/FormattedAnalysisText';
 
 // Define a more specific type for the analysis results
 interface ExamResults {
@@ -345,9 +346,129 @@ const ProfileExams: React.FC<ProfileExamsProps> = ({ showNutritionRecommendation
   };
 
   const handleExamClick = (exam: ExamFile) => {
+    // Apenas definir o exame selecionado
     setSelectedExam(exam);
+    
+    // Se o exame não tiver resultados, mostrar uma mensagem informativa
+    if (!exam.results || exam.status === 'pending') {
+      toast({
+        title: "Exame sem análise",
+        description: "Este exame ainda não foi analisado. Por favor, use a opção 'Analisar' para processá-lo.",
+        variant: "default",
+      });
+    }
   };
 
+  // Função para analisar um exame quando o usuário clica no botão Analisar
+  const handleAnalyzeExam = async (exam: ExamFile) => {
+    try {
+      // Mostrar toast de processamento
+      processingToast("Criando nova análise do exame...");
+      
+      // Obter o usuário atual
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        toast({
+          title: "Erro de autenticação",
+          description: "Você precisa estar logado para analisar exames.",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      // Obter os dados originais do exame
+      const { data: examData, error: fetchError } = await supabase
+        .from('medical_exams')
+        .select('file_path, content, exam_date, exam_type, name')
+        .eq('id', exam.id)
+        .single();
+      
+      if (fetchError || !examData) {
+        console.error('Erro ao obter dados do exame:', fetchError);
+        toast({
+          title: "Erro ao preparar análise",
+          description: "Não foi possível obter os dados do exame.",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      // Determinar um novo nome para o exame (incrementando contagem)
+      let baseName = examData.name;
+      let count = 1;
+      
+      // Verificar se o nome já termina com um número
+      const nameMatch = examData.name.match(/(.*?)(\d+)$/);
+      if (nameMatch) {
+        baseName = nameMatch[1];
+        count = parseInt(nameMatch[2], 10) + 1;
+      }
+      
+      // Criar novo nome com contador incrementado
+      const newExamName = `${baseName}${count}`;
+      
+      // Criar um novo registro para a nova análise
+      const { data: newExam, error: createError } = await supabase
+        .from('medical_exams')
+        .insert([
+          {
+            user_id: user.id,
+            name: newExamName,
+            file_path: examData.file_path,
+            content: examData.content,
+            exam_date: examData.exam_date,
+            exam_type: examData.exam_type,
+            status: 'analyzing'
+          }
+        ])
+        .select()
+        .single();
+      
+      if (createError || !newExam) {
+        console.error('Erro ao criar novo registro de exame:', createError);
+        toast({
+          title: "Erro ao criar nova análise",
+          description: "Não foi possível criar um novo registro para a análise.",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      // Processar o NOVO exame usando o serviço processExamAnalysis
+      const success = await processExamAnalysis(newExam.id);
+      
+      if (!success) {
+        toast({
+          title: "Erro na análise",
+          description: "Não foi possível completar a análise do exame.",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      toast({
+        title: "Nova análise criada",
+        description: `Nova análise '${newExamName}' criada com sucesso.`,
+      });
+        
+      // Recarregar a lista de exames para mostrar o novo exame
+      await loadExams();
+      
+      // Selecionar o novo exame criado
+      const updatedExam = exams.find(e => e.id === newExam.id);
+      if (updatedExam) {
+        setSelectedExam(updatedExam);
+      }
+    } catch (error) {
+      console.error('Erro ao processar exame:', error);
+      toast({
+        title: "Erro ao processar exame",
+        description: "Não foi possível processar o exame. Tente novamente mais tarde.",
+        variant: "destructive",
+      });
+    }
+  };
+  
   // Função para processar o exame com o conteúdo já extraído do arquivo
   const processExamWithContent = async (examId: string, fileContent: string, examType: string): Promise<boolean> => {
     try {
@@ -572,17 +693,16 @@ const ProfileExams: React.FC<ProfileExamsProps> = ({ showNutritionRecommendation
                 {exams.map((exam) => (
                   <div 
                     key={exam.id}
-                    onClick={() => handleExamClick(exam)}
-                    className="p-3 border rounded-lg cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-colors"
+                    className="p-3 border rounded-lg hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-colors"
                   >
                     <div className="flex justify-between items-start">
-                      <div>
+                      <div className="cursor-pointer" onClick={() => handleExamClick(exam)}>
                         <h3 className="font-medium">{exam.name}</h3>
                         <p className="text-sm text-slate-500 dark:text-slate-400">
                           {exam.exam_type} • {formatDate(exam.exam_date)}
                         </p>
                       </div>
-                      <div className="flex items-center">
+                      <div className="flex items-center gap-2">
                         {exam.status === 'analyzing' && (
                           <Badge variant="outline" className="flex items-center gap-1 bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/50 dark:text-blue-400 dark:border-blue-900">
                             <Loader2 className="h-3 w-3 animate-spin" />
@@ -595,6 +715,20 @@ const ProfileExams: React.FC<ProfileExamsProps> = ({ showNutritionRecommendation
                             Analisado
                           </Badge>
                         )}
+                        {(!exam.results || exam.status === 'pending') && (
+                          <Button 
+                            size="sm" 
+                            variant="outline"
+                            className="flex items-center gap-1 text-xs"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleAnalyzeExam(exam);
+                            }}
+                          >
+                            <Brain className="h-3 w-3" />
+                            Analisar
+                          </Button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -605,7 +739,7 @@ const ProfileExams: React.FC<ProfileExamsProps> = ({ showNutritionRecommendation
         </Card>
       </div>
       
-      {selectedExam && selectedExam.results && (
+      {selectedExam && (
         <Card className="border-indigo-100 dark:border-indigo-900 mt-6">
           <CardHeader className="bg-indigo-50 dark:bg-indigo-950/50 rounded-t-lg">
             <div className="flex justify-between items-start">
@@ -626,53 +760,83 @@ const ProfileExams: React.FC<ProfileExamsProps> = ({ showNutritionRecommendation
             </div>
           </CardHeader>
           <CardContent className="pt-6 space-y-6">
-            <div>
-              <h3 className="font-medium text-lg mb-2 flex items-center gap-2 text-foreground">
-                <Search className="h-4 w-4 text-indigo-500 dark:text-indigo-400" />
-                Resumo da Análise
-              </h3>
-              <p className="text-slate-700 dark:text-slate-300">
-                {selectedExam.results.summary}
-              </p>
-            </div>
-            
-            {selectedExam.results.abnormalValues && selectedExam.results.abnormalValues.length > 0 && (
-              <div>
-                <h3 className="font-medium text-lg mb-3 text-foreground">Valores fora da referência</h3>
-                <div className="space-y-3">
-                  {selectedExam.results.abnormalValues.map((value, index) => (
-                    <div 
-                      key={index} 
-                      className={`p-3 border rounded-lg ${getSeverityColor(value.severity)}`}
-                    >
-                      <div className="flex justify-between items-center mb-1">
-                        <h4 className="font-medium">{value.name}</h4>
-                        <span className="font-bold">{value.value}</span>
+            {selectedExam.results && typeof selectedExam.results === 'object' ? (
+              <>
+                <div>
+                  <h3 className="font-medium text-lg mb-2 flex items-center gap-2 text-foreground">
+                    <Search className="h-4 w-4 text-indigo-500 dark:text-indigo-400" />
+                    Resumo da Análise
+                  </h3>
+                  <div className="text-slate-700 dark:text-slate-300 overflow-hidden">
+                    {/* Primeiro verificar se há um HTML formatado no banco */}
+                    {(selectedExam as any).formatted_analysis_text ? (
+                      <div className="formatted-analysis"
+                        dangerouslySetInnerHTML={{ __html: (selectedExam as any).formatted_analysis_text }}
+                      />
+                    ) : selectedExam.results.summary && typeof selectedExam.results.summary === 'string' ? (
+                      <div className="formatted-analysis">
+                        <FormattedAnalysisText text={selectedExam.results.summary} />
                       </div>
-                      <p className="text-sm">Referência: {value.reference}</p>
+                    ) : null}
+                  </div>
+                </div>
+                
+                {selectedExam.results.abnormalValues && Array.isArray(selectedExam.results.abnormalValues) && selectedExam.results.abnormalValues.length > 0 && (
+                  <div>
+                    <h3 className="font-medium text-lg mb-3 text-foreground">Valores fora da referência</h3>
+                    <div className="space-y-3">
+                      {selectedExam.results.abnormalValues.map((value, index) => (
+                        <div 
+                          key={index} 
+                          className={`p-3 border rounded-lg ${getSeverityColor(value.severity)}`}
+                        >
+                          <div className="flex justify-between items-center mb-1">
+                            <h4 className="font-medium">{value.name}</h4>
+                            <span className="font-bold">{value.value}</span>
+                          </div>
+                          <p className="text-sm">Referência: {value.reference}</p>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  </div>
+                )}
+                
+                {selectedExam.results.recommendations && Array.isArray(selectedExam.results.recommendations) && selectedExam.results.recommendations.length > 0 && (
+                  <div>
+                    <h3 className="font-medium text-lg mb-3 text-foreground">Recomendações</h3>
+                    <ul className="space-y-2 list-disc pl-5">
+                      {selectedExam.results.recommendations.map((rec, index) => (
+                        <li key={index} className="text-slate-700 dark:text-slate-300">{rec}</li>
+                      ))}
+                    </ul>
+                    <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg dark:bg-amber-950/50 dark:border-amber-900">
+                      <p className="text-amber-800 text-sm dark:text-amber-400">
+                        <strong>Importante:</strong> Estas recomendações são baseadas em uma análise automatizada de seus exames e devem ser discutidas com seu médico ou nutricionista para confirmação.
+                      </p>
+                    </div>
+                  </div>
+                )}
+                
+                {renderNutritionRecommendations(selectedExam)}
+              </>
+            ) : (
+              <div className="text-center py-8">
+                <AlertCircle className="h-12 w-12 mx-auto text-amber-500 mb-4" />
+                <h3 className="text-lg font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  Exame sem análise
+                </h3>
+                <p className="text-slate-500 dark:text-slate-400 max-w-md mx-auto mb-6">
+                  Este exame ainda não foi analisado. Clique no botão abaixo para processá-lo com IA.
+                </p>
+                <Button 
+                  onClick={() => handleAnalyzeExam(selectedExam)}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-2 mx-auto"
+                >
+                  <Brain className="h-4 w-4" />
+                  Analisar Exame
+                </Button>
               </div>
             )}
-            
-            {selectedExam.results.recommendations && (
-              <div>
-                <h3 className="font-medium text-lg mb-3 text-foreground">Recomendações</h3>
-                <ul className="space-y-2 list-disc pl-5">
-                  {selectedExam.results.recommendations.map((rec, index) => (
-                    <li key={index} className="text-slate-700 dark:text-slate-300">{rec}</li>
-                  ))}
-                </ul>
-                <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg dark:bg-amber-950/50 dark:border-amber-900">
-                  <p className="text-amber-800 text-sm dark:text-amber-400">
-                    <strong>Importante:</strong> Estas recomendações são baseadas em uma análise automatizada de seus exames e devem ser discutidas com seu médico ou nutricionista para confirmação.
-                  </p>
-                </div>
-              </div>
-            )}
-            
-            {renderNutritionRecommendations(selectedExam)}
           </CardContent>
           <CardFooter className="border-t pt-4 dark:border-slate-700">
             <Button 

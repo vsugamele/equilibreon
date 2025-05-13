@@ -47,29 +47,34 @@ const Navbar = () => {
             </Link>
           </div>
           
-          <div className="hidden md:flex md:items-center md:space-x-4">
-            <div className="flex space-x-4 items-center">
+          <div className="hidden md:flex md:items-center md:space-x-2">
+            <div className="flex space-x-2 items-center">
               {isAuthenticated ?
             // Authenticated menu items
             <>
-                  <Link to="/dashboard" className="text-slate-600 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white px-3 py-2 rounded-md text-sm font-medium">
+                  <Link to="/dashboard" className="text-slate-600 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white px-2 py-2 rounded-md text-xs font-medium">
                     Dashboard
                   </Link>
-                  <Link to="/meal-tracking" className="text-slate-600 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white px-3 py-2 rounded-md text-sm font-medium">
+                  <Link to="/meal-tracking" className="text-slate-600 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white px-2 py-2 rounded-md text-xs font-medium">
                     Refeições
                   </Link>
-                  <Link to="/meal-plan" className="text-slate-600 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white px-3 py-2 rounded-md text-sm font-medium">
-                    Plano Alimentar
+                  <Link to="/meal-plan" className="text-slate-600 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white px-2 py-2 rounded-md text-xs font-medium">
+                    Plano
                   </Link>
-                  <Link to="/calorie-analyzer" className="text-slate-600 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
-                    <Camera className="w-4 h-4 mr-1" />
-                    Analisador
+                  <Link to="/calorie-analyzer" className="text-slate-600 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white px-2 py-2 rounded-md text-xs font-medium flex items-center">
+                    <Camera className="w-3 h-3" />
                   </Link>
-                  <Link to="/exercise" className="text-slate-600 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white px-3 py-2 rounded-md text-sm font-medium">
+                  <Link to="/exercise" className="text-slate-600 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white px-2 py-2 rounded-md text-xs font-medium">
                     Exercícios
                   </Link>
-                  <Link to="/emotional-support" className="text-slate-600 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white px-3 py-2 rounded-md text-sm font-medium">
-                    Suporte Emocional
+                  <Link to="/progress-analytics" className="text-slate-600 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white px-2 py-2 rounded-md text-xs font-medium">
+                    Progresso
+                  </Link>
+                  <Link to="/adherence-metrics" className="text-slate-600 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white px-2 py-2 rounded-md text-xs font-medium">
+                    Aderência
+                  </Link>
+                  <Link to="/emotional-support" className="text-slate-600 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white px-2 py-2 rounded-md text-xs font-medium">
+                    Emocional
                   </Link>
                   <div className="relative ml-3">
                     <div className="flex items-center space-x-3">
@@ -131,6 +136,12 @@ const Navbar = () => {
                 </Link>
                 <Link to="/exercise" className="block px-3 py-2 rounded-md text-base font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-200 dark:hover:text-white dark:hover:bg-slate-800" onClick={() => setIsOpen(false)}>
                   Exercícios
+                </Link>
+                <Link to="/progress-analytics" className="block px-3 py-2 rounded-md text-base font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-200 dark:hover:text-white dark:hover:bg-slate-800" onClick={() => setIsOpen(false)}>
+                  Análise de Progresso
+                </Link>
+                <Link to="/adherence-metrics" className="block px-3 py-2 rounded-md text-base font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-200 dark:hover:text-white dark:hover:bg-slate-800" onClick={() => setIsOpen(false)}>
+                  Métricas de Aderência
                 </Link>
                 <Link to="/emotional-support" className="block px-3 py-2 rounded-md text-base font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-200 dark:hover:text-white dark:hover:bg-slate-800" onClick={() => setIsOpen(false)}>
                   Suporte Emocional

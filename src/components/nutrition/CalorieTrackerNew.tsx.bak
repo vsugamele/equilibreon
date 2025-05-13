@@ -149,8 +149,6 @@ const CalorieTrackerNew: React.FC<CalorieTrackerProps> = ({ className }) => {
         protein: 0,
         carbs: 0,
         fat: 0,
-        fiber: 0,
-        sugar: 0,
         sodium: 0,
         confidence: 1.0,
         foodItems: [
@@ -352,7 +350,7 @@ const CalorieTrackerNew: React.FC<CalorieTrackerProps> = ({ className }) => {
               protein: analysisResult.protein || 0,
               carbs: analysisResult.carbs || 0,
               fat: analysisResult.fat || 0,
-              fiber: analysisResult.fiber || 0,
+              
               sugar: analysisResult.sugar || 0,
               sodium: analysisResult.sodium || 0,
               confidence: analysisResult.confidence || 1.0,

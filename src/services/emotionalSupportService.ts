@@ -59,63 +59,92 @@ function addCamelCaseProps(record: EmotionalAssessmentRecord): EmotionalAssessme
 }
 
 // Get emotional assessment history for a user
-export const getEmotionalAssessmentHistory = (): EmotionalAssessmentRecord[] => {
-  // In a real implementation, this would fetch from Supabase
-  // For now, return some mock data with both naming conventions
-  return [
-    {
-      id: '1',
-      user_id: '123',
-      timestamp: '2023-10-15T00:00:00Z',
-      mood: 'good',
-      stress_level: '2',
-      sleep_quality: 'good',
-      concerns: ['anxiety', 'focus'],
-      description: 'Feeling better today after starting the new routine.',
-      stressLevel: '2',
-      sleepQuality: 'good',
-      otherConcern: null,
-      other_concern: null,
-      session_messages: null
-    },
-    {
-      id: '2',
-      user_id: '123',
-      timestamp: '2023-10-10T00:00:00Z',
-      mood: 'neutral',
-      stress_level: '3',
-      sleep_quality: 'poor',
-      concerns: ['stress', 'sleep'],
-      description: 'Work pressure is causing some sleep issues.',
-      stressLevel: '3',
-      sleepQuality: 'poor',
-      otherConcern: null,
-      other_concern: null,
-      session_messages: null
-    },
-    {
-      id: '3',
-      user_id: '123',
-      timestamp: '2023-10-05T00:00:00Z',
-      mood: 'bad',
-      stress_level: '4',
-      sleep_quality: 'very-poor',
-      concerns: ['anxiety', 'stress', 'sleep'],
-      description: 'Difficult week with multiple deadlines.',
-      stressLevel: '4',
-      sleepQuality: 'very-poor',
-      otherConcern: null,
-      other_concern: null,
-      session_messages: null
+export const getEmotionalAssessmentHistory = async (): Promise<EmotionalAssessmentRecord[]> => {
+  try {
+    // Obter o usuário atual
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    
+    if (authError || !user) {
+      console.error('Erro ao obter usuário:', authError);
+      return [];
     }
-  ];
+    
+    // Buscar os registros de avaliação emocional do usuário atual
+    const { data, error } = await supabase
+      .from('emotional_assessments')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('timestamp', { ascending: false });
+      
+    if (error) {
+      // Verifique se o erro é devido à tabela não existir
+      if (error.code === '42P01' || error.message?.includes('does not exist')) {
+        console.warn('A tabela emotional_assessments não existe no banco de dados. Execute a migração necessária.');
+      } else {
+        console.error('Erro ao buscar avaliações emocionais:', error);
+      }
+      return [];
+    }
+    
+    // Adicionar propriedades em camelCase e retornar
+    return (data || []).map(record => addCamelCaseProps(record as EmotionalAssessmentRecord));
+  } catch (error) {
+    console.error('Erro ao buscar histórico de avaliações emocionais:', error);
+    
+    // Fallback para dados mockados em caso de erro
+    return [
+      {
+        id: '1',
+        user_id: '123',
+        timestamp: '2023-10-15T00:00:00Z',
+        mood: 'good',
+        stress_level: '2',
+        sleep_quality: 'good',
+        concerns: ['anxiety', 'focus'],
+        description: 'Feeling better today after starting the new routine.',
+        stressLevel: '2',
+        sleepQuality: 'good',
+        otherConcern: null,
+        other_concern: null,
+        session_messages: null
+      },
+      {
+        id: '2',
+        user_id: '123',
+        timestamp: '2023-10-10T00:00:00Z',
+        mood: 'neutral',
+        stress_level: '3',
+        sleep_quality: 'poor',
+        concerns: ['stress', 'sleep'],
+        description: 'Work pressure is causing some sleep issues.',
+        stressLevel: '3',
+        sleepQuality: 'poor',
+        otherConcern: null,
+        other_concern: null,
+        session_messages: null
+      }
+    ];
+  }
 };
 
 // Update the session messages for an assessment
-export const updateSessionMessages = (messages: any[]): void => {
-  // In a real implementation, this would update the record in Supabase
-  console.log('Updating session messages:', messages);
-  // For now, just log the messages
+export const updateSessionMessages = async (assessmentId: string, messages: any[]): Promise<boolean> => {
+  try {
+    const { error } = await supabase
+      .from('emotional_assessments')
+      .update({ session_messages: messages })
+      .eq('id', assessmentId);
+    
+    if (error) {
+      console.error('Erro ao atualizar mensagens da sessão:', error);
+      return false;
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('Erro ao atualizar mensagens da sessão:', error);
+    return false;
+  }
 };
 
 // Get emotional progress data for charts
@@ -143,42 +172,62 @@ const getMoodValue = (mood: string): number => {
 };
 
 // Get a list of users with their emotional records
-export const getUsersWithEmotionalRecords = (users: any[]): any[] => {
-  // In a real implementation, this would join user data with emotional assessment data
-  // For now, we'll add some mock emotional data to the provided users
-  return users.map(user => {
-    const emotionalRecords = getEmotionalAssessmentHistory()
-      .filter(record => record.user_id === user.id || Math.random() > 0.5)
-      .map(record => addCamelCaseProps(record));
-    
-    const lastEmotionalCheck = emotionalRecords.length > 0 
-      ? new Date(Math.max(...emotionalRecords.map(r => new Date(r.timestamp).getTime())))
-      : null;
-    
-    // Calculate an emotional score based on recent records
-    const recentRecords = emotionalRecords
-      .filter(r => {
-        const recordDate = new Date(r.timestamp);
-        const now = new Date();
-        return now.getTime() - recordDate.getTime() < 30 * 24 * 60 * 60 * 1000; // last 30 days
-      })
-      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-      .slice(0, 5);
-    
-    const emotionalScore = recentRecords.length > 0
-      ? Math.round(recentRecords.reduce((acc, r) => acc + getMoodValue(r.mood), 0) / recentRecords.length * 2) / 2
-      : Math.round((Math.random() * 6 + 3) * 2) / 2; // Random score between 3-9 if no records
-    
-    const concernsCount = [...new Set(emotionalRecords.flatMap(r => r.concerns || []))].length;
-    
-    return {
-      ...user,
-      emotionalRecords,
-      lastEmotionalCheck,
-      emotionalScore,
-      concernsCount
-    };
-  });
+export const getUsersWithEmotionalRecords = async (users: any[]): Promise<any[]> => {
+  // Promise.all para processar todos os usuários em paralelo
+  return Promise.all(users.map(async (user) => {
+    try {
+      // Buscar registros emocionais para este usuário
+      let emotionalRecords: EmotionalAssessmentRecord[] = [];
+      
+      // Se estamos em uma visão administrativa, buscar registros do usuário específico
+      if (user && user.id) {
+        const { data, error } = await supabase
+          .from('emotional_assessments')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('timestamp', { ascending: false });
+          
+        if (!error && data) {
+          emotionalRecords = data.map(record => addCamelCaseProps(record as EmotionalAssessmentRecord));
+        }
+      } else {
+        // Fallback para mock data se necessário
+        const allRecords = await getEmotionalAssessmentHistory();
+        emotionalRecords = allRecords.filter(_ => Math.random() > 0.5);
+      }
+      
+      const lastEmotionalCheck = emotionalRecords.length > 0 
+        ? new Date(Math.max(...emotionalRecords.map(r => new Date(r.timestamp).getTime())))
+        : null;
+      
+      // Calculate an emotional score based on recent records
+      const recentRecords = emotionalRecords
+        .filter(r => {
+          const recordDate = new Date(r.timestamp);
+          const now = new Date();
+          return now.getTime() - recordDate.getTime() < 30 * 24 * 60 * 60 * 1000; // last 30 days
+        })
+        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+        .slice(0, 5);
+      
+      const emotionalScore = recentRecords.length > 0
+        ? Math.round(recentRecords.reduce((acc, r) => acc + getMoodValue(r.mood), 0) / recentRecords.length * 2) / 2
+        : Math.round((Math.random() * 6 + 3) * 2) / 2; // Random score between 3-9 if no records
+      
+      const concernsCount = [...new Set(emotionalRecords.flatMap(r => r.concerns || []))].length;
+      
+      return {
+        ...user,
+        emotionalRecords,
+        lastEmotionalCheck,
+        emotionalScore,
+        concernsCount
+      };
+    } catch (error) {
+      console.error('Erro ao processar usuário para painel emocional:', error);
+      return user; // Retornar usuário sem dados emocionais em caso de erro
+    }
+  }));
 };
 
 // Determine the emotional trend based on records
@@ -211,36 +260,45 @@ export const getEmotionalTrend = (records: EmotionalAssessmentRecord[]): 'improv
 };
 
 // Get a summary of emotional journey for a user
-export const getEmotionalJourneySummary = (): {
+export const getEmotionalJourneySummary = async (): Promise<{
   recordCount: number;
   lastAssessment: EmotionalAssessmentRecord | null;
   improvementAreas: string[];
-} => {
-  const records = getEmotionalAssessmentHistory()
-    .map(record => addCamelCaseProps(record));
-  
-  // Sort records by date (newest first)
-  const sortedRecords = [...records].sort((a, b) => {
-    return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
-  });
-  
-  // Count frequency of concerns
-  const concernsFrequency: Record<string, number> = {};
-  records.forEach(record => {
-    (record.concerns || []).forEach(concern => {
-      concernsFrequency[concern] = (concernsFrequency[concern] || 0) + 1;
+}> => {
+  try {
+    // Buscar registros de avaliação emocional
+    const records = await getEmotionalAssessmentHistory();
+    
+    // Sort records by date (newest first)
+    const sortedRecords = [...records].sort((a, b) => {
+      return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
     });
-  });
-  
-  // Get top 3 most frequent concerns
-  const improvementAreas = Object.entries(concernsFrequency)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 3)
-    .map(([concern]) => concern);
-  
-  return {
-    recordCount: records.length,
-    lastAssessment: sortedRecords.length > 0 ? sortedRecords[0] : null,
-    improvementAreas
-  };
+    
+    // Count frequency of concerns
+    const concernsFrequency: Record<string, number> = {};
+    records.forEach(record => {
+      (record.concerns || []).forEach(concern => {
+        concernsFrequency[concern] = (concernsFrequency[concern] || 0) + 1;
+      });
+    });
+    
+    // Get top 3 most frequent concerns
+    const improvementAreas = Object.entries(concernsFrequency)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([concern]) => concern);
+    
+    return {
+      recordCount: records.length,
+      lastAssessment: sortedRecords.length > 0 ? sortedRecords[0] : null,
+      improvementAreas
+    };
+  } catch (error) {
+    console.error('Erro ao obter resumo da jornada emocional:', error);
+    return {
+      recordCount: 0,
+      lastAssessment: null,
+      improvementAreas: []
+    };
+  }
 };

@@ -1,4 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
+import { saveOnboardingSupplements } from './supplementService';
 
 /**
  * Verifica se o usuário completou o processo de onboarding na nova tabela nutri_users
@@ -147,6 +148,17 @@ export const saveNutriOnboardingData = async (formData: any): Promise<boolean> =
     if (error) {
       console.error('Erro ao atualizar perfil nutri_users:', error);
       throw error;
+    }
+    
+    // Se o formulário contém a lista estruturada de suplementos, salvar na tabela específica
+    if (formData.supplementList && Array.isArray(formData.supplementList) && formData.supplementList.length > 0) {
+      try {
+        // Salvar suplementos na tabela específica
+        await saveOnboardingSupplements(user.id, formData.supplementList);
+      } catch (suppError) {
+        console.error('Erro ao salvar suplementos na tabela específica:', suppError);
+        // Não falhar todo o processo por conta de erro nos suplementos
+      }
     }
 
     return true;

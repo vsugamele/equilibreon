@@ -6,5 +6,6 @@ export const supabaseConfig = {
 
 // Configuração da API OpenAI
 export const openaiConfig = {
-  apiKey: "sk-QT8aiBrnNIeY0P1qD5AnNXKjs2VkFxGxBeAch44H2l3y2pTmWfZ-g1LJJycNRyRX14gw0G49q1T3BlbkFJpGRNXbPPDrI92UvMaHYZ16Z7xalr9tV6SW5ZAEiIE2SiFHWj0Jgo6wUK7tYi8s540d7YWOAoEA"
+  // Usando a chave de API fornecida diretamente
+  apiKey: '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'
 };

@@ -60,16 +60,102 @@ async function analyzeImage(imageFile: File): Promise<FoodAnalysisResult> {
     
     // Extrair dados da resposta
     const nutritionData = analysisResponse.data;
+    console.log('Dados de nutrição recebidos:', JSON.stringify(nutritionData));
     
-    // Nome do alimento principal (primeiro item ou nome genérico)
-    const foodName = nutritionData.foodItems && nutritionData.foodItems.length > 0 
-      ? nutritionData.foodItems[0].name 
-      : 'Alimento Analisado';
+    // Processar os dados de acordo com o formato retornado
+    // Verificar se temos dados em um formato esperado
+    if (!nutritionData) {
+      throw new Error('Dados de nutrição não encontrados na resposta');
+    }
     
-    // Garantir que temos uma lista de alimentos válida
-    const foodItems = Array.isArray(nutritionData.foodItems) && nutritionData.foodItems.length > 0 
-      ? nutritionData.foodItems 
-      : [{ name: foodName || 'Item Alimentar', calories: nutritionData.calories || 0, portion: '100g' }];
+    // Extrair informações do prato ou alimento
+    let foodName = '';
+    let calories = 0;
+    let protein = 0;
+    let carbs = 0;
+    let fat = 0;
+    let fiber = 0;
+    let foodItems: FoodItem[] = [];
+    
+    // Tentar extrair informações de diferentes formatos possíveis
+    if (nutritionData.foodName) {
+      foodName = nutritionData.foodName;
+    } else if (nutritionData.dishName) {
+      foodName = nutritionData.dishName;
+    } else if (nutritionData.summary) {
+      foodName = nutritionData.summary.split('.')[0]; // Primeira frase do resumo
+    } else if (nutritionData.details && typeof nutritionData.details === 'string') {
+      // Tentar extrair o nome do prato do texto de detalhes
+      const firstLine = nutritionData.details.split('\n')[0];
+      foodName = firstLine.split(':').pop() || 'Alimento Analisado';
+    } else {
+      foodName = 'Alimento Analisado';
+    }
+    
+    // Extrair calorias e macronutrientes
+    if (nutritionData.calories) {
+      calories = parseFloat(nutritionData.calories) || 0;
+    } else if (nutritionData.details && nutritionData.details.calories) {
+      calories = parseFloat(nutritionData.details.calories) || 0;
+    } else if (typeof nutritionData.details === 'string') {
+      // Tentar extrair calorias do texto
+      const caloriesMatch = nutritionData.details.match(/calorias?[:\s]+([0-9]+)/i);
+      if (caloriesMatch && caloriesMatch[1]) {
+        calories = parseInt(caloriesMatch[1]);
+      }
+    }
+    
+    // Extrair macronutrientes
+    if (nutritionData.protein) {
+      protein = parseFloat(nutritionData.protein) || 0;
+    } else if (nutritionData.details && nutritionData.details.protein) {
+      protein = parseFloat(nutritionData.details.protein) || 0;
+    }
+    
+    if (nutritionData.carbs) {
+      carbs = parseFloat(nutritionData.carbs) || 0;
+    } else if (nutritionData.details && nutritionData.details.carbs) {
+      carbs = parseFloat(nutritionData.details.carbs) || 0;
+    } else if (nutritionData.details && nutritionData.details.carbohydrates) {
+      carbs = parseFloat(nutritionData.details.carbohydrates) || 0;
+    }
+    
+    if (nutritionData.fat) {
+      fat = parseFloat(nutritionData.fat) || 0;
+    } else if (nutritionData.details && nutritionData.details.fat) {
+      fat = parseFloat(nutritionData.details.fat) || 0;
+    }
+    
+    if (nutritionData.fiber) {
+      fiber = parseFloat(nutritionData.fiber) || 0;
+    } else if (nutritionData.details && nutritionData.details.fiber) {
+      fiber = parseFloat(nutritionData.details.fiber) || 0;
+    }
+    
+    // Processar itens de alimentos individuais, se disponíveis
+    if (Array.isArray(nutritionData.foodItems) && nutritionData.foodItems.length > 0) {
+      foodItems = nutritionData.foodItems;
+    } else if (nutritionData.details && Array.isArray(nutritionData.details.items)) {
+      foodItems = nutritionData.details.items.map((item: any) => ({
+        name: item.name || 'Item alimentar',
+        calories: parseFloat(item.calories) || 0,
+        portion: item.portion || '100g',
+        protein: parseFloat(item.protein) || 0,
+        carbs: parseFloat(item.carbs) || 0,
+        fat: parseFloat(item.fat) || 0
+      }));
+    } else {
+      // Criar um item padrão se não houver itens específicos
+      foodItems = [{ 
+        name: foodName, 
+        calories: calories, 
+        portion: '100g',
+        protein: protein,
+        carbs: carbs,
+        fat: fat,
+        fiber: fiber
+      }];
+    }
       
     // Buscar dados do perfil do usuário para recomendações personalizadas
     let userRecommendations: string[] = [];

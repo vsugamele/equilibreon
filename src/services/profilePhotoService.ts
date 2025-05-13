@@ -257,54 +257,26 @@ export const uploadProgressPhoto = async (
   } catch (error) {
     console.error('Error in photo upload process:', error);
     return null;
-  }
-};
-
-// Get all progress photos for a user
 export const getProgressPhotos = async (): Promise<ProgressPhoto[]> => {
+  console.log('Iniciando getProgressPhotos... Buscando fotos de progresso');
   try {
-    // Get the current user
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    // Get current user
+    const authResponse = await supabase.auth.getUser();
+    const { data: { user }, error: authError } = authResponse;
     
     if (authError || !user) {
-      console.error("User not authenticated", authError);
-      throw new Error("User not authenticated");
+      console.error("Usuário não autenticado:", authError);
+      return [];
     }
     
-    // Get photos from database
-    const { data, error } = await supabase
+    console.log('Usuário autenticado, ID:', user.id);
+    
+    // Fetch photos from Supabase
+    const response = await supabase
       .from('progress_photos')
       .select('*')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false });
-
-    if (error) {
-      console.error('Error fetching photos:', error);
-      throw error;
-    }
-
-    if (!data || data.length === 0) {
-      return [];
-    }
-
-    // Process photos to add signed URLs and other metadata
-    const processedPhotos = await Promise.all(data.map(async (photo) => {
-      console.log('Processando foto:', photo.id, photo.photo_url);
-      
-      // Verify if the URL is already a public URL or needs signing
-      if (!photo.photo_url.includes('?token=')) {
-        return photo;
-      }
-      
-      try {
-        // Get a signed URL for better access
-        const { data, error } = await supabase.storage
-          .from('progress_photos')
-          .createSignedUrl(
-            // Extract path from URL
-            new URL(photo.photo_url).pathname.split('/object/public/')[1] || 
-            new URL(photo.photo_url).pathname.split('/object/sign/')[1],
-            60 * 60 // 1 hour expiry
           );
         
         if (data?.signedUrl) {

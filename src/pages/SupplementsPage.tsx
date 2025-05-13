@@ -13,8 +13,7 @@ const SupplementsPage = () => {
       <main className="flex-grow bg-slate-50 dark:bg-slate-900 pt-20 pb-20 md:pb-0">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="mb-8">
-            <h1 className="text-3xl font-bold text-slate-800 dark:text-white">Suplementos</h1>
-            <p className="text-slate-600 dark:text-slate-300 mt-2">
+            <p className="text-slate-600 dark:text-slate-300">
               Fórmulas e suplementos recomendados para sua saúde
             </p>
           </div>

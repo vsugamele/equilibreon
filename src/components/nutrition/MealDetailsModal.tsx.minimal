@@ -1,0 +1,39 @@
+import React from 'react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+
+interface MealDetailsModalProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
+
+const MealDetailsModal = ({
+  open,
+  onOpenChange
+}: MealDetailsModalProps) => {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Detalhes da Refeição</DialogTitle>
+          <DialogDescription>
+            Informações sobre esta refeição
+          </DialogDescription>
+        </DialogHeader>
+        <div>Conteúdo do modal</div>
+        <DialogFooter>
+          <Button onClick={() => onOpenChange(false)}>Fechar</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+export default MealDetailsModal;
