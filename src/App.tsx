@@ -15,7 +15,7 @@ import Login from './pages/Login';
 import ForgotPassword from './pages/ForgotPassword';
 import QuickSignUp from './pages/QuickSignUp';
 import Onboarding from './pages/onboarding/Onboarding';  // Changed to use the onboarding folder version
-import Dashboard from './pages/Dashboard';
+import DashboardSimplified from "./pages/DashboardSimplified";
 import ProfilePage from './pages/ProfilePage';
 import ProfilePhotosPage from './pages/ProfilePhotosPage';
 import ProfileExamsPage from './pages/ProfileExamsPage';
@@ -100,7 +100,7 @@ function App() {
               } />
               <Route path="/dashboard" element={
                 <ProtectedRoute>
-                  <Dashboard />
+                  <DashboardSimplified />
                 </ProtectedRoute>
               } />
               <Route path="/history" element={
