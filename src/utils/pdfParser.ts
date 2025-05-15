@@ -137,6 +137,9 @@ export const extractTextFromPDF = async (file: File): Promise<string> => {
         const fileData = await file.arrayBuffer();
         const arrayBuffer = new Uint8Array(fileData);
         
+        // Criar um Blob a partir do ArrayBuffer (adicionado para garantir conversão adequada)
+        const blob = new Blob([arrayBuffer], { type: 'application/pdf' });
+        
         // Carregar o documento PDF
         const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
         let fullText = '';
@@ -152,14 +155,43 @@ export const extractTextFromPDF = async (file: File): Promise<string> => {
           fullText += `Página ${i}: ${pageText}\n\n`;
         }
         
+        // Se o texto extraído for muito curto, pode ser um PDF com conteúdo como imagem
+        if (fullText.trim().length < 100) {
+          console.log(`Texto extraído é muito curto (${fullText.length} caracteres), tentando fallback`);
+          fullText += "\n[ATENÇÃO: Este parece ser um PDF com pouco texto extraível.";
+        }
+        
         console.log(`PDF processado com sucesso: ${file.name}, ${fullText.length} caracteres`);
         return fullText;
       } catch (pdfError) {
         console.error('Erro ao processar PDF com PDF.js, tentando FileReader como fallback:', pdfError);
         
         // Fallback para FileReader se o PDF.js falhar
-        const fallbackText = await readFileAsText(file);
-        return `Arquivo PDF: ${file.name} (processado com método alternativo)\n\n${fallbackText}`;
+        try {
+          // Criar um Blob a partir do arquivo para garantir a compatibilidade
+          const blob = new Blob([await file.arrayBuffer()], { type: file.type });
+          
+          // Criar URL para o Blob
+          const blobUrl = URL.createObjectURL(blob);
+          
+          // Usar fetch para obter o conteúdo como texto
+          const response = await fetch(blobUrl);
+          let fallbackText = await response.text();
+          
+          // Limpar a URL do Blob
+          URL.revokeObjectURL(blobUrl);
+          
+          // Se o texto estiver vazio ou não for legível, tentar readFileAsText
+          if (!fallbackText || fallbackText.length < 20) {
+            fallbackText = await readFileAsText(file);
+          }
+          
+          return `Arquivo PDF: ${file.name} (processado com método alternativo)\n\n${fallbackText}`;
+        } catch (fallbackError) {
+          console.error('Erro no método fallback:', fallbackError);
+          const basicFallback = await readFileAsText(file);
+          return `Arquivo PDF: ${file.name} (processado com método básico)\n\n${basicFallback}`;
+        }
       }
     }
     

@@ -1,4 +1,5 @@
 import React from 'react';
+import React from 'react';
 import { Badge } from "@/components/ui/badge";
 import { CheckCircle, AlertCircle, AlertTriangle, FileText, Beaker, Activity, HeartPulse } from 'lucide-react';
 
@@ -76,7 +77,6 @@ export const processAnalysisText = (text: string): React.ReactNode => {
         const content = lines.slice(1).join('\n');
         
         // Determinar estilo com base no título
-        const titleLower = title.toLowerCase();
         let bgColor = "blue-50";
         let borderColor = "blue-100";
         let textColor = "blue-800";
@@ -84,31 +84,31 @@ export const processAnalysisText = (text: string): React.ReactNode => {
         let SectionIcon = FileText;
         
         // Mapear tipos de seções para cores específicas - definição estática para Tailwind
-        if (titleLower.includes('hemograma')) {
+        if (title.toLowerCase().includes('hemograma')) {
           bgColor = "red-50";
           borderColor = "red-100";
           textColor = "red-800";
           iconColor = "red-600";
           SectionIcon = Activity;
-        } else if (titleLower.includes('tireoid') || titleLower.includes('hormônio')) {
+        } else if (title.toLowerCase().includes('tireoid') || title.toLowerCase().includes('hormônio')) {
           bgColor = "purple-50";
           borderColor = "purple-100";
           textColor = "purple-800";
           iconColor = "purple-600";
           SectionIcon = Beaker;
-        } else if (titleLower.includes('metabolismo') || titleLower.includes('glicose')) {
+        } else if (title.toLowerCase().includes('metabolismo') || title.toLowerCase().includes('glicose')) {
           bgColor = "green-50";
           borderColor = "green-100";
           textColor = "green-800";
           iconColor = "green-600";
           SectionIcon = Activity;
-        } else if (titleLower.includes('lipídio') || titleLower.includes('colesterol')) {
+        } else if (title.toLowerCase().includes('lipídio') || title.toLowerCase().includes('colesterol')) {
           bgColor = "amber-50";
           borderColor = "amber-100";
           textColor = "amber-800";
           iconColor = "amber-600";
           SectionIcon = HeartPulse;
-        } else if (titleLower.includes('considera') || titleLower.includes('final')) {
+        } else if (title.toLowerCase().includes('considera') || title.toLowerCase().includes('final')) {
           bgColor = "emerald-50";
           borderColor = "emerald-100";
           textColor = "emerald-800";
@@ -130,6 +130,26 @@ export const processAnalysisText = (text: string): React.ReactNode => {
       })}
     </div>
   );
+};
+
+  if (titleLower.includes('hemograma') || titleLower.includes('sangue')) {
+    return { icon: Activity, color: 'red' };
+  } else if (titleLower.includes('vitamina') || titleLower.includes('mineral')) {
+    return { icon: Beaker, color: 'green' };
+  } else if (titleLower.includes('hormônio') || titleLower.includes('tireóide')) {
+    return { icon: HeartPulse, color: 'purple' };
+  } else if (titleLower.includes('metabolismo') || titleLower.includes('glicose')) {
+    return { icon: Activity, color: 'blue' };
+  } else if (titleLower.includes('lipídio') || titleLower.includes('colesterol')) {
+    return { icon: Beaker, color: 'amber' };
+  } else if (titleLower.includes('considerações')) {
+    return { icon: FileText, color: 'slate' };
+  } else if (titleLower.includes('recomendações')) {
+    return { icon: CheckCircle, color: 'emerald' };
+  }
+  
+  // Default
+  return { icon: FileText, color: 'gray' };
 };
 
 // Função para processar o conteúdo do texto dentro de cada seção

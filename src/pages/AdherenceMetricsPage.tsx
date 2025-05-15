@@ -5,6 +5,8 @@ import { toast } from 'sonner';
 import AdherenceSummary from '../components/progress/AdherenceSummary';
 import AdherenceCalendar from '../components/progress/AdherenceCalendar';
 import { getCurrentDate, getDateDaysAgo } from '../utils/dateUtils';
+import Navbar from '../components/layout/Navbar';
+import Footer from '../components/layout/Footer';
 
 const AdherenceMetricsPage: React.FC = () => {
   const navigate = useNavigate();
@@ -71,7 +73,11 @@ const AdherenceMetricsPage: React.FC = () => {
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
+    <div className="min-h-screen flex flex-col bg-gradient-to-br from-indigo-50 via-white to-indigo-100 dark:from-slate-900 dark:via-slate-950 dark:to-indigo-950">
+      <Navbar />
+      <main className="flex-1 w-full max-w-5xl mx-auto py-8 px-4 sm:px-8">
+        <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-lg p-6 sm:p-10 mt-8 mb-8">
+
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-800">Métricas de Aderência Nutricional</h1>
         <p className="text-gray-600 mt-2">
@@ -159,6 +165,9 @@ const AdherenceMetricsPage: React.FC = () => {
         <p>Os dados são calculados com base nas refeições registradas no período selecionado.</p>
         <p>Para melhorar suas métricas, tente registrar todas as refeições conforme planejado em seu plano nutricional.</p>
       </div>
+        </div>
+      </main>
+      <Footer />
     </div>
   );
 };

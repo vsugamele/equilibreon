@@ -1,5 +1,4 @@
-
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
@@ -7,13 +6,24 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
 import Navbar from '@/components/layout/Navbar';
 import Footer from '@/components/layout/Footer';
+import { toast } from 'sonner';
 import { 
   Dna, ChevronRight, ChevronLeft, Check, Zap, 
-  Brain, HeartPulse, AlertCircle, Target, Award
+  Brain, HeartPulse, AlertCircle, Target, Award,
+  Loader2
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useNavigate } from 'react-router-dom';
-import { useForm } from 'react-hook-form';
+import { 
+  loadEpigeneticState, 
+  saveEpigeneticState, 
+  saveAnswer, 
+  toggleMultiAnswer,
+  nextStep as nextEpigeneticStep,
+  previousStep as previousEpigeneticStep,
+  completeAssessment,
+  submitEpigeneticAssessment
+} from '@/services/epigeneticService';
 
 type Question = {
   id: string;
@@ -240,113 +250,133 @@ const sections = [
   }
 ];
 
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-
 const EpigeneticAssessment = () => {
-  const [currentSection, setCurrentSection] = useState(0);
-  const [currentStepInSection, setCurrentStepInSection] = useState(0);
-  const [showIntro, setShowIntro] = useState(true);
-  const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
-  const [completed, setCompleted] = useState(false);
-  const [showPitchModal, setShowPitchModal] = useState(false); // não será mais usado para pitch
-  const [showLeadModal, setShowLeadModal] = useState(false);
   const navigate = useNavigate();
-  const form = useForm();
+  const [showIntro, setShowIntro] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [state, setState] = useState(() => loadEpigeneticState());
+  
+  // Atualizar o estado de forma reativa
+  const updateState = () => {
+    setState(loadEpigeneticState());
+  };
 
   // Filter questions by current section
-  const questionsInCurrentSection = questions.filter(q => q.section === currentSection);
-  const currentQuestion = questionsInCurrentSection[currentStepInSection];
+  const questionsInCurrentSection = questions.filter(q => q.section === state.currentSection);
+  const currentQuestion = questionsInCurrentSection[state.currentStepInSection];
 
   // Calculate overall progress
   const totalQuestions = questions.length;
-  const answeredQuestionsCount = Object.keys(answers).length;
+  const answeredQuestionsCount = Object.keys(state.answers).length;
   const totalProgress = (answeredQuestionsCount / totalQuestions) * 100;
 
   // Section progress
-  const sectionProgress = ((currentStepInSection + 1) / questionsInCurrentSection.length) * 100;
+  const sectionProgress = ((state.currentStepInSection + 1) / questionsInCurrentSection.length) * 100;
 
   const handleStartAssessment = () => {
     setShowIntro(false);
   };
-
+  
+  // Navegação para a próxima etapa com validação
   const handleNextInSection = () => {
-    if (currentStepInSection < questionsInCurrentSection.length - 1) {
-      setCurrentStepInSection(currentStepInSection + 1);
-    } else {
-      if (currentSection < 4) {
-        setCurrentSection(currentSection + 1);
-        setCurrentStepInSection(0);
-      } else {
-        setCompleted(true);
-      }
+    // Garantir que a resposta atual está salva antes de avançar
+    if (!isCurrentQuestionAnswered()) {
+      toast.warning("Por favor, responda a pergunta atual antes de continuar.");
+      return;
     }
-  };
-
-  const handlePreviousInSection = () => {
-    if (currentStepInSection > 0) {
-      setCurrentStepInSection(currentStepInSection - 1);
-    } else if (currentSection > 0) {
-      setCurrentSection(currentSection - 1);
-      const previousSectionQuestions = questions.filter(q => q.section === currentSection - 1);
-      setCurrentStepInSection(previousSectionQuestions.length - 1);
-    }
-  };
-
-  const handleSingleAnswerChange = (questionId: string, value: string) => {
-    setAnswers({ ...answers, [questionId]: value });
-  };
-
-  const handleMultiAnswerChange = (questionId: string, value: string, checked: boolean) => {
-    const currentAnswers = answers[questionId] as string[] || [];
     
-    if (checked) {
-      setAnswers({ 
-        ...answers, 
-        [questionId]: [...currentAnswers, value] 
-      });
-    } else {
-      setAnswers({
-        ...answers,
-        [questionId]: currentAnswers.filter(item => item !== value)
-      });
-    }
+    // Passar o número de questões na seção atual
+    nextEpigeneticStep(questionsInCurrentSection.length);
+    updateState();
   };
 
+  // Navegação para a etapa anterior
+  const handlePreviousInSection = () => {
+    // Calcular o número de questões na seção anterior para posicionar corretamente
+    const prevSectionQuestions = state.currentSection > 0 
+      ? questions.filter(q => q.section === state.currentSection - 1).length 
+      : 0;
+      
+    previousEpigeneticStep(prevSectionQuestions);
+    updateState();
+  };
+
+  // Manipulação de respostas de opção única
+  const handleSingleAnswerChange = (questionId: string, value: string) => {
+    saveAnswer(questionId, value);
+    updateState();
+  };
+
+  // Manipulação de respostas multi-seleção
+  const handleMultiAnswerChange = (questionId: string, value: string, checked: boolean) => {
+    toggleMultiAnswer(questionId, value, checked);
+    updateState();
+  };
+
+  // Manipulação de campos condicionais
   const handleConditionalChange = (questionId: string, value: string) => {
-    setAnswers({ ...answers, [`${questionId}-conditional`]: value });
+    saveAnswer(`${questionId}-conditional`, value);
+    updateState();
   };
 
+  // Verificação de resposta preenchida
   const isCurrentQuestionAnswered = () => {
     if (!currentQuestion) return true;
     
     if (currentQuestion.type === 'multi-checkbox') {
-      const selectedOptions = answers[currentQuestion.id] as string[] || [];
+      const selectedOptions = state.answers[currentQuestion.id] as string[] || [];
       return selectedOptions.length > 0;
     }
     
-    return answers[currentQuestion.id] !== undefined;
+    return state.answers[currentQuestion.id] !== undefined;
   };
 
-  const handleFinish = () => {
-    setShowPitchModal(false);
-    // Aqui você poderia enviar as respostas para o backend
-    console.log("Respostas completas:", answers);
-    // Redirecionar para o dashboard com mensagem de sucesso
-    navigate('/dashboard');
+  // Finalizar e enviar a avaliação
+  const handleFinish = async () => {
+    setSubmitting(true);
+    
+    try {
+      const result = await submitEpigeneticAssessment();
+      
+      if (result.success) {
+        toast.success("Avaliação epigenética enviada com sucesso!");
+        completeAssessment(); // Marcar como concluída
+        navigate('/dashboard');
+      } else {
+        toast.error(result.error || "Houve um problema ao enviar sua avaliação. Tente novamente.");
+      }
+    } catch (error) {
+      toast.error("Erro ao enviar avaliação. Verifique sua conexão e tente novamente.");
+      console.error("Erro ao finalizar avaliação:", error);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const getCurrentSectionIcon = () => {
-    const section = sections.find(s => s.id === currentSection);
+    const section = sections.find(s => s.id === state.currentSection);
     const Icon = section?.icon || Dna;
     return <Icon className="h-8 w-8 text-indigo-600" />;
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-gradient-to-br from-indigo-50 via-white to-indigo-100 dark:from-slate-900 dark:via-slate-950 dark:to-indigo-950">
+    <div className="flex flex-col min-h-screen bg-gradient-to-b from-slate-50 to-indigo-50 dark:from-slate-900 dark:to-indigo-950">
       <Navbar />
-      <main className="flex-1 w-full max-w-3xl mx-auto py-8 px-4 sm:px-8">
-        <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-lg p-6 sm:p-10 mt-8 mb-8">
-          {showIntro ? (
+      <main className="flex-grow pt-20">
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
+          {state.completed ? (
+            <div className="text-center p-8">
+              <h2 className="text-2xl font-bold mb-4">Avaliação Concluída</h2>
+              <p className="mb-6">Sua avaliação epigenética foi enviada com sucesso!</p>
+              <Button 
+                onClick={() => navigate('/dashboard')} 
+                variant="indigo"
+                className="mt-4"
+              >
+                Voltar para Dashboard
+              </Button>
+            </div>
+          ) : showIntro ? (
             <div className="bg-white dark:bg-slate-800 rounded-xl shadow-md border border-indigo-100 dark:border-indigo-900 p-8 mb-8 transition-all duration-300">
               <div className="text-center mb-8">
                 <div className="inline-flex items-center justify-center bg-indigo-100 dark:bg-indigo-900 p-4 rounded-full mb-6">
@@ -391,20 +421,20 @@ const EpigeneticAssessment = () => {
                 </Button>
               </div>
             </div>
-          ) : !completed ? (
+          ) : (
             <>
               <div className="text-center mb-8">
                 <div className="flex flex-col items-center space-y-2 mb-4">
                   <div className="inline-flex items-center justify-center bg-indigo-100 dark:bg-indigo-900 p-4 rounded-full mb-2 shadow-sm">
                     {getCurrentSectionIcon()}
                   </div>
-                  <span className="text-xs font-medium text-indigo-500 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/60 px-3 py-1 rounded-full">{`Etapa ${currentSection + 1} de 5`}</span>
+                  <span className="text-xs font-medium text-indigo-500 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/60 px-3 py-1 rounded-full">{`Etapa ${state.currentSection + 1} de 5`}</span>
                 </div>
                 <h1 className="text-2xl md:text-3xl font-display font-bold bg-gradient-to-r from-indigo-700 to-indigo-500 dark:from-indigo-400 dark:to-indigo-300 bg-clip-text text-transparent mb-3">
-                  {sections[currentSection].title}
+                  {sections[state.currentSection].title}
                 </h1>
                 <p className="text-slate-600 dark:text-slate-300 max-w-2xl mx-auto leading-relaxed">
-                  {sections[currentSection].description}
+                  {sections[state.currentSection].description}
                 </p>
               </div>
 
@@ -432,9 +462,9 @@ const EpigeneticAssessment = () => {
                         
                         {currentQuestion.type === 'radio' && currentQuestion.options && (
                           <RadioGroup
-                            value={answers[currentQuestion.id] as string || ""}
+                            value={state.answers[currentQuestion.id] as string || ""}
                             onValueChange={(value) => {
-                              setAnswers({ ...answers, [currentQuestion.id]: value });
+                              saveAnswer(currentQuestion.id, value);
                             }}
                             className="space-y-4"
                           >
@@ -452,7 +482,7 @@ const EpigeneticAssessment = () => {
                         {currentQuestion.type === 'multi-checkbox' && currentQuestion.options && (
                           <div className="grid md:grid-cols-2 gap-3">
                             {currentQuestion.options.map((option) => {
-                              const checkedValues = answers[currentQuestion.id] as string[] || [];
+                              const checkedValues = state.answers[currentQuestion.id] as string[] || [];
                               const isChecked = checkedValues.includes(option.value);
                               
                               return (
@@ -462,19 +492,8 @@ const EpigeneticAssessment = () => {
                                     checked={isChecked}
                                     onCheckedChange={(checked) => 
                                       {
-                                        const currentAnswers = answers[currentQuestion.id] as string[] || [];
-                                        
-                                        if (checked) {
-                                          setAnswers({ 
-                                            ...answers, 
-                                            [currentQuestion.id]: [...currentAnswers, option.value] 
-                                          });
-                                        } else {
-                                          setAnswers({
-                                            ...answers,
-                                            [currentQuestion.id]: currentAnswers.filter(item => item !== option.value)
-                                          });
-                                        }
+                                        const isChecked = checked === true;
+                                        toggleMultiAnswer(currentQuestion.id, option.value, isChecked);
                                       }
                                     }
                                     className="border-indigo-300 dark:border-indigo-600"
@@ -489,15 +508,15 @@ const EpigeneticAssessment = () => {
                         )}
 
                         {currentQuestion.conditionalField && 
-                          answers[currentQuestion.id] === 'yes' && (
+                          state.answers[currentQuestion.id] === 'yes' && (
                             <div className="mt-5 ml-7 p-4 bg-slate-50 dark:bg-slate-700 rounded-lg border border-slate-100 dark:border-slate-600">
                               <Label htmlFor={`${currentQuestion.id}-conditional`} className="block mb-2 text-sm font-medium text-slate-700 dark:text-slate-300">
                                 {currentQuestion.conditionalField.placeholder}
                               </Label>
                               <Input
                                 id={`${currentQuestion.id}-conditional`}
-                                value={answers[`${currentQuestion.id}-conditional`] as string || ""}
-                                onChange={(e) => setAnswers({ ...answers, [`${currentQuestion.id}-conditional`]: e.target.value })}
+                                value={state.answers[`${currentQuestion.id}-conditional`] as string || ""}
+                                onChange={(e) => saveAnswer(`${currentQuestion.id}-conditional`, e.target.value)}
                                 placeholder={currentQuestion.conditionalField.placeholder}
                                 className="w-full border-indigo-200 dark:border-indigo-700 focus:border-indigo-300 dark:focus:border-indigo-600"
                               />
@@ -514,10 +533,10 @@ const EpigeneticAssessment = () => {
                 <Button
                   variant="outline"
                   onClick={handlePreviousInSection}
-                  disabled={currentSection === 0 && currentStepInSection === 0}
+                  disabled={state.currentSection === 0 && state.currentStepInSection === 0}
                   className={cn(
                     "border-indigo-200 dark:border-indigo-700 hover:bg-indigo-50 dark:hover:bg-indigo-900/50 transition-all duration-300",
-                    currentSection === 0 && currentStepInSection === 0 ? 'opacity-0 pointer-events-none' : ''
+                    state.currentSection === 0 && state.currentStepInSection === 0 ? 'opacity-0 pointer-events-none' : ''
                   )}
                 >
                   <ChevronLeft className="h-4 w-4 mr-2" />
@@ -529,7 +548,7 @@ const EpigeneticAssessment = () => {
                   variant="indigo"
                   className="hover:shadow-lg transition-all duration-300 shadow-md"
                 >
-                  {currentSection < 4 || currentStepInSection < questionsInCurrentSection.length - 1 ? (
+                  {state.currentSection < 4 || state.currentStepInSection < questionsInCurrentSection.length - 1 ? (
                     <>
                       Próxima
                       <ChevronRight className="h-4 w-4 ml-2" />
@@ -551,105 +570,82 @@ const EpigeneticAssessment = () => {
               <p className="text-slate-600 dark:text-slate-300 mb-10 max-w-lg mx-auto text-lg">
                 Obrigado pelas informações! Nossos especialistas irão analisar seus dados para oferecer recomendações personalizadas baseadas em fatores epigenéticos.
               </p>
-              {completed && (
-                <div className="bg-white dark:bg-slate-800 rounded-xl shadow-md border border-indigo-100 dark:border-indigo-900 p-8 mb-10">
-                  <h3 className="font-bold text-xl md:text-2xl mb-6 bg-gradient-to-r from-indigo-700 to-purple-600 dark:from-indigo-400 dark:to-purple-400 bg-clip-text text-transparent">
-                    POR QUE ESTE TESTE É UMA OPORTUNIDADE ÚNICA?
-                  </h3>
-                  <div className="bg-amber-50 dark:bg-amber-900/30 border-l-4 border-amber-400 dark:border-amber-500 p-5 text-amber-800 dark:text-amber-200 mb-8 text-left rounded-r-md shadow-sm">
-                    <p className="font-semibold text-lg mb-2">❗ ATENÇÃO: As inscrições para este teste são limitadas!</p>
-                    <p className="leading-relaxed">Devido à alta demanda, apenas algumas pessoas serão selecionadas para realizar essa análise epigenética.</p>
-                  </div>
-                  <div className="text-left mb-8 bg-gradient-to-br from-indigo-50 to-purple-50 dark:from-indigo-900/50 dark:to-purple-900/50 p-6 rounded-lg shadow-inner">
-                    <p className="font-semibold text-indigo-900 dark:text-indigo-200 mb-4 text-lg">💡 O que você vai ganhar ao fazer este teste?</p>
-                    <ul className="space-y-4">
-                      <li className="flex items-start">
-                        <div className="bg-indigo-100 dark:bg-indigo-800 rounded-full p-1.5 mt-0.5 mr-3 flex-shrink-0">
-                          <Check className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
-                        </div>
-                        <span className="text-indigo-800 dark:text-indigo-300">Um relatório exclusivo sobre o que está bloqueando seu metabolismo.</span>
-                      </li>
-                      <li className="flex items-start">
-                        <div className="bg-indigo-100 dark:bg-indigo-800 rounded-full p-1.5 mt-0.5 mr-3 flex-shrink-0">
-                          <Check className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
-                        </div>
-                        <span className="text-indigo-800 dark:text-indigo-300">Um plano alimentar epigenético para ativar genes saudáveis.</span>
-                      </li>
-                      <li className="flex items-start">
-                        <div className="bg-indigo-100 dark:bg-indigo-800 rounded-full p-1.5 mt-0.5 mr-3 flex-shrink-0">
-                          <Check className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
-                        </div>
-                        <span className="text-indigo-800 dark:text-indigo-300">Descobrir quais alimentos sabotam seu corpo e quais ativam sua energia.</span>
-                      </li>
-                      <li className="flex items-start">
-                        <div className="bg-indigo-100 dark:bg-indigo-800 rounded-full p-1.5 mt-0.5 mr-3 flex-shrink-0">
-                          <Check className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
-                        </div>
-                        <span className="text-indigo-800 dark:text-indigo-300">Estratégias para reverter inflamação, cansaço e envelhecimento precoce.</span>
-                      </li>
-                      <li className="flex items-start">
-                        <div className="bg-indigo-100 dark:bg-indigo-800 rounded-full p-1.5 mt-0.5 mr-3 flex-shrink-0">
-                          <Check className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
-                        </div>
-                        <span className="text-indigo-800 dark:text-indigo-300">Um mapa personalizado do seu DNA e sua expressão genética.</span>
-                      </li>
-                    </ul>
-                  </div>
-                  <div className="text-center space-y-5">
-                    <p className="font-medium text-indigo-900 dark:text-indigo-200 text-lg">📌 Este teste está disponível apenas para os primeiros interessados.</p>
-                    <p className="font-bold text-indigo-900 dark:text-indigo-200 text-lg">Não perca essa chance de transformar sua saúde com base na ciência da epigenética!</p>
-                    <Button 
-                      onClick={() => setShowLeadModal(true)} 
-                      variant="indigo"
-                      className="mt-4 text-lg px-10 py-6 shadow-md hover:shadow-lg transition-all duration-300 rounded-xl"
-                    >
-                      📲 Reserve sua vaga agora
-                      <ChevronRight className="ml-2 h-5 w-5" />
-                    </Button>
-                  </div>
+              
+              <div className="bg-white dark:bg-slate-800 rounded-xl shadow-md border border-indigo-100 dark:border-indigo-900 p-8 mb-10">
+                <h3 className="font-bold text-xl md:text-2xl mb-6 bg-gradient-to-r from-indigo-700 to-purple-600 dark:from-indigo-400 dark:to-purple-400 bg-clip-text text-transparent">
+                  POR QUE ESTE TESTE É UMA OPORTUNIDADE ÚNICA?
+                </h3>
+                
+                <div className="bg-amber-50 dark:bg-amber-900/30 border-l-4 border-amber-400 dark:border-amber-500 p-5 text-amber-800 dark:text-amber-200 mb-8 text-left rounded-r-md shadow-sm">
+                  <p className="font-semibold text-lg mb-2">❗ ATENÇÃO: As inscrições para este teste são limitadas!</p>
+                  <p className="leading-relaxed">Devido à alta demanda, apenas algumas pessoas serão selecionadas para realizar essa análise epigenética.</p>
+                </div>
+                
+                <div className="text-left mb-8 bg-gradient-to-br from-indigo-50 to-purple-50 dark:from-indigo-900/50 dark:to-purple-900/50 p-6 rounded-lg shadow-inner">
+                  <p className="font-semibold text-indigo-900 dark:text-indigo-200 mb-4 text-lg">💡 O que você vai ganhar ao fazer este teste?</p>
+                  <ul className="space-y-4">
+                    <li className="flex items-start">
+                      <div className="bg-indigo-100 dark:bg-indigo-800 rounded-full p-1.5 mt-0.5 mr-3 flex-shrink-0">
+                        <Check className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                      </div>
+                      <span className="text-indigo-800 dark:text-indigo-300">Um relatório exclusivo sobre o que está bloqueando seu metabolismo.</span>
+                    </li>
+                    <li className="flex items-start">
+                      <div className="bg-indigo-100 dark:bg-indigo-800 rounded-full p-1.5 mt-0.5 mr-3 flex-shrink-0">
+                        <Check className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                      </div>
+                      <span className="text-indigo-800 dark:text-indigo-300">Um plano alimentar epigenético para ativar genes saudáveis.</span>
+                    </li>
+                    <li className="flex items-start">
+                      <div className="bg-indigo-100 dark:bg-indigo-800 rounded-full p-1.5 mt-0.5 mr-3 flex-shrink-0">
+                        <Check className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                      </div>
+                      <span className="text-indigo-800 dark:text-indigo-300">Descobrir quais alimentos sabotam seu corpo e quais ativam sua energia.</span>
+                    </li>
+                    <li className="flex items-start">
+                      <div className="bg-indigo-100 dark:bg-indigo-800 rounded-full p-1.5 mt-0.5 mr-3 flex-shrink-0">
+                        <Check className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                      </div>
+                      <span className="text-indigo-800 dark:text-indigo-300">Estratégias para reverter inflamação, cansaço e envelhecimento precoce.</span>
+                    </li>
+                    <li className="flex items-start">
+                      <div className="bg-indigo-100 dark:bg-indigo-800 rounded-full p-1.5 mt-0.5 mr-3 flex-shrink-0">
+                        <Check className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                      </div>
+                      <span className="text-indigo-800 dark:text-indigo-300">Um mapa personalizado do seu DNA e sua expressão genética.</span>
+                    </li>
+                  </ul>
+                </div>
+                
+                <div className="text-center space-y-5">
+                  <p className="font-medium text-indigo-900 dark:text-indigo-200 text-lg">📌 Este teste está disponível apenas para os primeiros interessados.</p>
+                  <p className="font-bold text-indigo-900 dark:text-indigo-200 text-lg">Não perca essa chance de transformar sua saúde com base na ciência da epigenética!</p>
                   <Button 
-                    variant="outline" 
                     onClick={handleFinish} 
-                    className="mt-4 border-indigo-200 dark:border-indigo-700 hover:bg-indigo-50 dark:hover:bg-indigo-900/50"
+                    variant="indigo"
+                    className="mt-4 text-lg px-10 py-6 shadow-md hover:shadow-lg transition-all duration-300 rounded-xl"
+                    disabled={submitting}
                   >
-                    Voltar para Dashboard
+                    {submitting ? (
+                      <><Loader2 className="mr-2 h-5 w-5 animate-spin" />Processando...</>
+                    ) : (
+                      <><span>📲 Reserve sua vaga agora</span><ChevronRight className="ml-2 h-5 w-5" /></>
+                    )}
                   </Button>
                 </div>
-              )}
+              </div>
+              
+              <Button 
+                variant="outline" 
+                onClick={handleFinish} 
+                className="mt-4 border-indigo-200 dark:border-indigo-700 hover:bg-indigo-50 dark:hover:bg-indigo-900/50"
+              >
+                Voltar para Dashboard
+              </Button>
             </div>
           )}
         </div>
       </main>
-      <Dialog open={showLeadModal} onOpenChange={setShowLeadModal}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-2xl font-bold text-indigo-700 mb-2">Garanta sua transformação!</DialogTitle>
-          </DialogHeader>
-          <div className="mb-4 text-base text-slate-800 dark:text-slate-200">
-            <p>
-              Parabéns por chegar até aqui! Você está a um passo de descobrir como sua genética pode ser sua maior aliada para uma vida mais saudável e longeva.
-            </p>
-            <p className="mt-3 font-semibold text-indigo-700">Preencha seus dados e seja um dos primeiros a garantir o acesso ao teste epigenético exclusivo.</p>
-          </div>
-          {/* Aqui você pode adicionar um formulário ou CTA real, se desejar */}
-          <DialogFooter className="mt-4 flex flex-col gap-2">
-            <Button 
-              onClick={() => setShowLeadModal(false)} 
-              variant="indigo"
-              className="w-full text-lg px-8 py-4"
-            >
-              Quero garantir minha vaga
-            </Button>
-            <Button 
-              variant="outline" 
-              onClick={() => setShowLeadModal(false)}
-              className="w-full"
-            >
-              Fechar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-       </Dialog>
       <Footer />
     </div>
   );

@@ -10,11 +10,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Bell, Search, UserPlus, Filter, BarChart, FileText, Send, RefreshCw, CheckCircle, Heart, Pill, Plus, LineChart, Upload, Book, BookCopy, FileUp } from 'lucide-react';
 import { showRandomNotification, NotificationType } from '@/services/notificationService';
+import { addUserSupplement, getUserSupplements, updateUserSupplement, deleteUserSupplement, UserSupplement } from '@/services/supplementService';
+import { getUserExams, formatExamDate } from '@/services/examService';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import EmotionalHealthDashboard from '@/components/admin/EmotionalHealthDashboard';
 import UserProgressDashboard from '@/components/admin/UserProgressDashboard';
 import MobileNavbar from '@/components/layout/MobileNavbar';
+import SupplementsManager from '@/components/admin/SupplementsManager';
 import { toast } from 'sonner';
 import { AddUserDialog } from '@/components/admin/AddUserDialog';
 import { getAllNutriUsers, migrateAllUsersFromProfiles, NutriUser } from '@/services/nutriUsersService';
@@ -36,6 +39,7 @@ interface UserTableItem {
     muscleMass: string;
   };
   goals?: string[];
+  exams?: any[];
 }
 
 // Lista de usuários mockados para fallback (caso não existam usuários na nova tabela)
@@ -186,9 +190,10 @@ const AdminDashboard = () => {
   const [error, setError] = useState<string | null>(null);
   const [migrationStatus, setMigrationStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
 
-  // Função para buscar usuários da nova tabela nutri_users
+  // Effect para carregar usuários quando o componente é montado
   useEffect(() => {
-    const fetchNutriUsers = async () => {
+    // Função para buscar usuários
+    const fetchUsers = async () => {
       try {
         setLoading(true);
         setError(null);
@@ -277,15 +282,16 @@ const AdminDashboard = () => {
       }
     };
     
-    fetchNutriUsers();
+    fetchUsers();
   }, []);
 
   // Função para atualizar a lista de usuários
   const handleRefreshUsers = async () => {
     try {
       setLoading(true);
-      toast('Atualizando lista de usuários...');
+      setError(null);
       
+      // Buscar todos os usuários da tabela nutri_users
       const nutriUsers = await getAllNutriUsers();
       
       if (nutriUsers && nutriUsers.length > 0) {
@@ -341,11 +347,20 @@ const AdminDashboard = () => {
   const [activeTab, setActiveTab] = useState('users');
   const [isAddUserDialogOpen, setIsAddUserDialogOpen] = useState(false);
   
+  // Estados para gerenciar suplementos
   const [supplementName, setSupplementName] = useState('');
   const [supplementDescription, setSupplementDescription] = useState('');
   const [supplementDosage, setSupplementDosage] = useState('');
   const [supplementBenefits, setSupplementBenefits] = useState('');
+  const [supplementFrequency, setSupplementFrequency] = useState('');
+  const [supplementTiming, setSupplementTiming] = useState('');
+  const [supplementPurpose, setSupplementPurpose] = useState('');
   const [supplementUserId, setSupplementUserId] = useState('');
+  
+  // Lista de suplementos cadastrados no sistema
+  const [userSupplements, setUserSupplements] = useState<UserSupplement[]>([]);
+  const [loadingSupplements, setLoadingSupplements] = useState(false);
+  const [editingSupplementId, setEditingSupplementId] = useState<string | null>(null);
   
   const mockSupplements = [
     {
@@ -387,9 +402,34 @@ const AdminDashboard = () => {
     alert(`Notificação enviada para ${selectedUser.name}`);
   };
   
-  const handleSelectUser = (user: any) => {
+  const handleSelectUser = async (user: any) => {
+    // Inicializar com o usuário selecionado para feedback imediato
     setSelectedUser(user);
     setActiveTab('users');
+    
+    try {
+      // Agora buscar os exames do usuário
+      const userExams = await getUserExams(user.id);
+      
+      // Formatar os exames para exibição
+      const formattedExams = userExams.map(exam => ({
+        id: exam.id,
+        name: exam.name || 'Exame sem nome',
+        type: exam.type || 'Não especificado',
+        date: formatExamDate(exam.created_at),
+        status: exam.status
+      }));
+      
+      // Atualizar o usuário selecionado com os exames
+      setSelectedUser(prev => ({
+        ...prev,
+        exams: formattedExams
+      }));
+      
+    } catch (error) {
+      console.error('Erro ao carregar exames do usuário:', error);
+      toast.error('Erro ao carregar exames do usuário');
+    }
   };
 
   const getStatusBadgeClass = (status: string) => {
@@ -964,151 +1004,8 @@ const AdminDashboard = () => {
             </TabsContent>
             
             <TabsContent value="supplements" className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="md:col-span-2">
-                  <Card>
-                    <CardHeader className="pb-3">
-                      <div className="flex justify-between items-center">
-                        <CardTitle>Gerenciamento de Suplementos</CardTitle>
-                      </div>
-                      <CardDescription>
-                        Visualize e gerencie os suplementos e fórmulas recomendados
-                      </CardDescription>
-                      <div className="flex gap-2 pt-2">
-                        <div className="relative flex-grow">
-                          <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                          <Input
-                            placeholder="Buscar suplementos"
-                            className="pl-8"
-                          />
-                        </div>
-                        <Button variant="outline" size="icon">
-                          <Filter className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="rounded-md border">
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>Nome</TableHead>
-                              <TableHead>Descrição</TableHead>
-                              <TableHead>Dosagem</TableHead>
-                              <TableHead>Usuários</TableHead>
-                              <TableHead className="text-right">Ações</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {mockSupplements.map((supplement) => (
-                              <TableRow key={supplement.id} className="cursor-pointer hover:bg-slate-100 dark:hover:bg-gray-800">
-                                <TableCell className="font-medium">{supplement.name}</TableCell>
-                                <TableCell>{supplement.description}</TableCell>
-                                <TableCell>{supplement.dosage}</TableCell>
-                                <TableCell>
-                                  <span className="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
-                                    {supplement.assignedUsers} usuários
-                                  </span>
-                                </TableCell>
-                                <TableCell className="text-right">
-                                  <Button variant="ghost" size="sm" className="h-8">
-                                    Editar
-                                  </Button>
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
-                
-                <div>
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Adicionar Fórmula</CardTitle>
-                      <CardDescription>
-                        Cadastre um novo suplemento ou fórmula
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <form className="space-y-4">
-                        <div className="space-y-2">
-                          <Label htmlFor="supplement-user">Usuário</Label>
-                          <Select
-                            value={supplementUserId}
-                            onValueChange={setSupplementUserId}
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="Selecione um usuário" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectGroup>
-                                {mockUsers.map((user) => (
-                                  <SelectItem key={user.id} value={user.id.toString()}>
-                                    {user.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectGroup>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        
-                        <div className="space-y-2">
-                          <Label htmlFor="supplement-name">Nome do Suplemento</Label>
-                          <Input 
-                            id="supplement-name" 
-                            placeholder="Ex: Ômega 3" 
-                            value={supplementName}
-                            onChange={(e) => setSupplementName(e.target.value)}
-                          />
-                        </div>
-                        
-                        <div className="space-y-2">
-                          <Label htmlFor="supplement-description">Descrição</Label>
-                          <Textarea 
-                            id="supplement-description" 
-                            placeholder="Descreva o suplemento e seus componentes"
-                            rows={3}
-                            value={supplementDescription}
-                            onChange={(e) => setSupplementDescription(e.target.value)}
-                          />
-                        </div>
-                        
-                        <div className="space-y-2">
-                          <Label htmlFor="supplement-dosage">Dosagem Recomendada</Label>
-                          <Input 
-                            id="supplement-dosage" 
-                            placeholder="Ex: 1000mg, 1 cápsula ao dia" 
-                            value={supplementDosage}
-                            onChange={(e) => setSupplementDosage(e.target.value)}
-                          />
-                        </div>
-                        
-                        <div className="space-y-2">
-                          <Label htmlFor="supplement-benefits">Benefícios</Label>
-                          <Textarea 
-                            id="supplement-benefits" 
-                            placeholder="Descreva os benefícios deste suplemento"
-                            rows={3}
-                            value={supplementBenefits}
-                            onChange={(e) => setSupplementBenefits(e.target.value)}
-                          />
-                        </div>
-                        
-                        <Button 
-                          type="button" 
-                          className="w-full bg-blue-500 hover:bg-blue-600"
-                          onClick={handleAddSupplement}
-                        >
-                          <Plus className="mr-2 h-4 w-4" /> Adicionar Fórmula
-                        </Button>
-                      </form>
-                    </CardContent>
-                  </Card>
-                </div>
-              </div>
+              {/* Utilizamos o componente SupplementsManager para gerenciar suplementos */}
+              <SupplementsManager users={users} />
             </TabsContent>
             
             <TabsContent value="emotional" className="space-y-4">

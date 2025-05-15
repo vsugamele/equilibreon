@@ -6,6 +6,7 @@ import { PlusCircle, MinusCircle, Droplet, ChartLine } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import * as waterIntakeService from '@/services/waterIntakeService';
+import { saveWaterHistory } from '@/services/waterHistoryService';
 import { WaterIntakeRecord } from '@/services/waterIntakeService';
 
 export default function WaterIntakeTracker() {
@@ -41,7 +42,11 @@ export default function WaterIntakeTracker() {
     try {
       const updated = await waterIntakeService.addWaterGlass();
       setWaterIntake(updated);
-      toast.success('Copo de água registrado! 💧');
+      
+      // Atualizar o histórico de água
+      await saveWaterHistory();
+      
+      toast.success('Copo de água registrado! ');
     } catch (error) {
       console.error('Erro ao adicionar copo de água:', error);
       toast.error('Não foi possível registrar o copo de água');
@@ -52,6 +57,10 @@ export default function WaterIntakeTracker() {
     try {
       const updated = await waterIntakeService.removeWaterGlass();
       setWaterIntake(updated);
+      
+      // Atualizar o histórico de água
+      await saveWaterHistory();
+      
       toast.info('Copo de água removido');
     } catch (error) {
       console.error('Erro ao remover copo de água:', error);

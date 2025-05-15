@@ -2,11 +2,11 @@ import React from 'react';
 import Navbar from '@/components/layout/Navbar';
 import Footer from '@/components/layout/Footer';
 import MobileNavbar from '@/components/layout/MobileNavbar';
-import WaterIntakeHistoryComponent from '@/components/nutrition/WaterIntakeHistory';
+import WaterIntakeHistory from '@/components/nutrition/WaterIntakeHistory';
 import WaterIntakeTracker from '@/components/nutrition/WaterIntakeTracker';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Droplet, TrendingUp, Calendar } from 'lucide-react';
+import { Droplet, Calendar, TrendingUp } from 'lucide-react';
 
 const WaterIntakeHistoryPage = () => {
   return (
@@ -20,17 +20,16 @@ const WaterIntakeHistoryPage = () => {
         
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           <div className="lg:col-span-3 space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center text-xl">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
+              <div className="p-6">
+                <h2 className="text-xl font-bold flex items-center mb-2">
                   <TrendingUp className="h-5 w-5 mr-2 text-blue-500" />
-                  Histórico Detalhado de Hidratação
-                </CardTitle>
-                <CardDescription>
+                  Histórico de Hidratação
+                </h2>
+                <p className="text-gray-500 dark:text-gray-400 mb-4">
                   Análise completa da sua hidratação ao longo do tempo
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
+                </p>
+
                 <Tabs defaultValue="7" className="w-full">
                   <TabsList className="grid w-full grid-cols-4 mb-4">
                     <TabsTrigger value="7">7 dias</TabsTrigger>
@@ -40,20 +39,20 @@ const WaterIntakeHistoryPage = () => {
                   </TabsList>
 
                   <TabsContent value="7">
-                    <WaterIntakeHistoryComponent days={7} />
+                    <WaterIntakeHistory days={7} />
                   </TabsContent>
                   <TabsContent value="15">
-                    <WaterIntakeHistoryComponent days={15} />
+                    <WaterIntakeHistory days={15} />
                   </TabsContent>
                   <TabsContent value="30">
-                    <WaterIntakeHistoryComponent days={30} />
+                    <WaterIntakeHistory days={30} />
                   </TabsContent>
                   <TabsContent value="90">
-                    <WaterIntakeHistoryComponent days={90} />
+                    <WaterIntakeHistory days={90} />
                   </TabsContent>
                 </Tabs>
-              </CardContent>
-            </Card>
+              </div>
+            </div>
             
             <Card>
               <CardHeader>

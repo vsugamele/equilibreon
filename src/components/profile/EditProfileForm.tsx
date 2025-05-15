@@ -26,6 +26,10 @@ interface ProfileFormData {
   gender: string;
   height: string;
   weight: string;
+  waist_circumference?: string;   // Circunferência da cintura em inglês
+  abdominal_circumference?: string; // Circunferência abdominal em inglês
+  circunferenciaCintura?: string;  // Circunferência da cintura em português
+  circunferenciaAbdominal?: string; // Circunferência abdominal em português
   activity_level: string;
   sleep_quality: string;
   stress_level: string;
@@ -114,7 +118,9 @@ const EditProfileForm: React.FC<EditProfileFormProps> = ({
       'dietaryRestrictions', 'dietaryRestrictionsText',
       'supplements', 'supplementsText', 'supplementsFrequency',
       'secondaryGoals', 'secondaryGoalsText',
-      'physicalActivityType', 'physicalActivityFrequency', 'desiredExercise'
+      'physicalActivityType', 'physicalActivityFrequency', 'desiredExercise',
+      'circunferenciaCintura', 'waistCircumference',
+      'circunferenciaAbdominal', 'abdominalCircumference'
     ];
     
     if (profileData?.onboarding_data) {
@@ -152,6 +158,20 @@ const EditProfileForm: React.FC<EditProfileFormProps> = ({
     gender: profileData.genero || profileData.gender || '',
     height: profileData.altura || profileData.height || '',
     weight: profileData.peso || profileData.weight || '',
+    
+    // Circunferências em português e inglês
+    waist_circumference: profileData.waist_circumference || 
+                       (onboardingData as any)?.waistCircumference || 
+                       (onboardingData as any)?.circunferenciaCintura || '',
+    abdominal_circumference: profileData.abdominal_circumference || 
+                          (onboardingData as any)?.abdominalCircumference || 
+                          (onboardingData as any)?.circunferenciaAbdominal || '',
+    circunferenciaCintura: profileData.circunferenciaCintura || 
+                         (onboardingData as any)?.circunferenciaCintura || 
+                         (onboardingData as any)?.waistCircumference || '',
+    circunferenciaAbdominal: profileData.circunferenciaAbdominal || 
+                           (onboardingData as any)?.circunferenciaAbdominal || 
+                           (onboardingData as any)?.abdominalCircumference || '',
     
     // Dados de saúde - verificar campos em português e inglês
     activity_level: profileData.nivel_atividade || profileData.activity_level || '',
@@ -281,6 +301,12 @@ const EditProfileForm: React.FC<EditProfileFormProps> = ({
         genero: formData.gender,
         altura: formData.height,
         peso: formData.weight,
+        circunferenciaCintura: formData.circunferenciaCintura,
+        circunferenciaAbdominal: formData.circunferenciaAbdominal,
+        
+        // Dados físicos (em inglês para compatibilidade)
+        waistCircumference: formData.circunferenciaCintura,
+        abdominalCircumference: formData.circunferenciaAbdominal,
         
         // Dados de saúde (em português)
         nivelAtividade: formData.activity_level,
@@ -324,37 +350,40 @@ const EditProfileForm: React.FC<EditProfileFormProps> = ({
       
       console.log('Onboarding data atualizado para salvar:', updatedOnboardingData);
       
+      // Calcular IMC se altura e peso estiverem presentes
+      const height = parseFloat(formData.height);
+      const weight = parseFloat(formData.weight);
+      let calculatedIMC = null;
+      
+      if (height > 0 && weight > 0) {
+        // Altura deve estar em metros para o cálculo do IMC
+        const heightInMeters = height / 100; // Converter cm para metros
+        calculatedIMC = weight / (heightInMeters * heightInMeters);
+        console.log('IMC calculado:', calculatedIMC);
+        
+        // Adicionar IMC calculado ao onboarding_data (tratando como any para aceitar campos dinâmicos)
+        (updatedOnboardingData as any).imc = calculatedIMC.toFixed(2);
+        (updatedOnboardingData as any).bmi = calculatedIMC.toFixed(2); // Versão em inglês
+      }
+      
       // Atualizar o perfil com os dados básicos + onboarding_data atualizado
+      // Incluindo colunas específicas para as circunferências e IMC
       const { error } = await supabase
-        .from('nutri_users' as any)
+        .from('nutri_users')
         .update({
           nome: formData.nome,
           email: formData.email,
           telefone: formData.telefone,
-          address: formData.address,
-          neighborhood: formData.neighborhood,
-          city: formData.city,
-          state: formData.state,
-          zip_code: formData.zip_code,
           avatar_url: formData.avatar_url,
           
-          // Campos específicos da nutrição
-          idade: formData.age,
-          genero: formData.gender,
-          altura: formData.height,
-          peso: formData.weight,
-          objetivo: formData.objetivo,
+          // Colunas específicas para circunferências
+          waist_circumference: formData.circunferenciaCintura,
+          abdominal_circumference: formData.circunferenciaAbdominal,
           
-          // Métricas e dados adicionais
-          nivel_atividade: formData.activity_level,
-          qualidade_sono: formData.sleep_quality,
-          nivel_stress: formData.stress_level,
-          queixa_principal: formData.health_issues_text,
-          restricoes_alimentares: formData.dietary_restrictions,
-          medicamentos: formData.health_issues_text,
-          suplementos: formData.supplements_text,
+          // IMC calculado
+          imc: calculatedIMC ? calculatedIMC.toFixed(2) : null,
           
-          // Dados completos do onboarding
+          // Salvando dados completos no campo onboarding_data
           onboarding_data: updatedOnboardingData,
           updated_at: new Date().toISOString()
         })
@@ -452,44 +481,6 @@ const EditProfileForm: React.FC<EditProfileFormProps> = ({
                 />
               </div>
               
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="age">Idade</Label>
-                  <Input
-                    id="age"
-                    name="age"
-                    type="number"
-                    value={formData.age}
-                    onChange={handleInputChange}
-                    placeholder="Sua idade"
-                  />
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="height">Altura (cm)</Label>
-                  <Input
-                    id="height"
-                    name="height"
-                    type="number"
-                    value={formData.height}
-                    onChange={handleInputChange}
-                    placeholder="Sua altura em cm"
-                  />
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="weight">Peso (kg)</Label>
-                  <Input
-                    id="weight"
-                    name="weight"
-                    type="number"
-                    value={formData.weight}
-                    onChange={handleInputChange}
-                    placeholder="Seu peso em kg"
-                  />
-                </div>
-              </div>
-              
               <div className="space-y-2">
                 <Label htmlFor="gender">Gênero</Label>
                 <Select 
@@ -533,6 +524,57 @@ const EditProfileForm: React.FC<EditProfileFormProps> = ({
             </TabsContent>
             
             <TabsContent value="health" className="space-y-4 mt-4">
+              {/* Grid para campos básicos de antropometria */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="height">Altura (cm)</Label>
+                  <Input
+                    id="height"
+                    name="height"
+                    type="number"
+                    value={formData.height}
+                    onChange={handleInputChange}
+                    placeholder="175"
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="weight">Peso (kg)</Label>
+                  <Input
+                    id="weight"
+                    name="weight"
+                    type="number"
+                    value={formData.weight}
+                    onChange={handleInputChange}
+                    placeholder="70"
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="circunferenciaCintura">Circunferência da Cintura (cm)</Label>
+                  <Input
+                    id="circunferenciaCintura"
+                    name="circunferenciaCintura"
+                    type="number"
+                    value={formData.circunferenciaCintura}
+                    onChange={handleInputChange}
+                    placeholder="80"
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="circunferenciaAbdominal">Circunferência Abdominal (cm)</Label>
+                  <Input
+                    id="circunferenciaAbdominal"
+                    name="circunferenciaAbdominal"
+                    type="number"
+                    value={formData.circunferenciaAbdominal}
+                    onChange={handleInputChange}
+                    placeholder="90"
+                  />
+                </div>
+              </div>
+              
               <div className="space-y-2">
                 <Label htmlFor="activity_level">Nível de Atividade Física</Label>
                 <Select 

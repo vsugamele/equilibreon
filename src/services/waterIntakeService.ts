@@ -1,7 +1,28 @@
 import { supabase } from '@/lib/supabase';
 import { User } from '@supabase/supabase-js';
+import { saveWaterHistory } from './waterHistoryService';
 
 // Serviço para gerenciar o consumo de água com suporte a Supabase e localStorage
+
+/**
+ * Ajuda a obter datas considerando o fuso horário do Brasil (GMT-3)
+ * Isso corrige problemas de reset de contagens que acontecem antes da meia-noite no Brasil
+ */
+export const getBrazilDate = (): string => {
+  // Formata a data considerando o fuso horário de Brasília
+  const dateString = new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' });
+  
+  // Extrair a parte da data (MM/DD/YYYY)
+  const datePart = dateString.split(',')[0];
+  const parts = datePart.split('/');
+  
+  // Formatá-la como YYYY-MM-DD
+  const month = parts[0].padStart(2, '0');
+  const day = parts[1].padStart(2, '0');
+  const year = parts[2];
+  
+  return `${year}-${month}-${day}`;
+};
 
 // Tipos para armazenar dados de consumo de água
 export interface WaterIntakeData {
@@ -152,7 +173,7 @@ const LOCAL_WATER_INTAKE_KEY = 'nutri_mindflow_water_intake';
  */
 export const getLocalWaterIntake = async (): Promise<WaterIntakeRecord> => {
   try {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getBrazilDate(); // Usar a função com fuso horário do Brasil para evitar reset prematuro
     
     // Tentar obter do Supabase primeiro, se o usuário estiver autenticado
     try {
@@ -289,6 +310,9 @@ export async function setLocalWaterTarget(weight: number): Promise<WaterIntakeRe
   // Salvar localmente e sincronizar com o Supabase
   await saveLocalWaterIntake(updated);
   
+  // Atualizar o histórico de água
+  await saveWaterHistory();
+  
   return updated;
 }
 
@@ -307,6 +331,9 @@ export async function addLocalWaterGlass(): Promise<WaterIntakeRecord> {
   
   // Salvar localmente e sincronizar com o Supabase
   await saveLocalWaterIntake(updated);
+  
+  // Atualizar o histórico de água
+  await saveWaterHistory();
   
   return updated;
 }
@@ -327,6 +354,9 @@ export async function removeLocalWaterGlass(): Promise<WaterIntakeRecord> {
   // Salvar localmente e sincronizar com o Supabase
   await saveLocalWaterIntake(updated);
   
+  // Atualizar o histórico de água
+  await saveWaterHistory();
+  
   return updated;
 }
 
@@ -343,7 +373,7 @@ export async function syncToSupabase(waterIntakeData: WaterIntakeData): Promise<
       return;
     }
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = getBrazilDate(); // Usar a função com fuso horário do Brasil para evitar reset prematuro
 
     try {
       // Verificar se já existe um registro para hoje
@@ -359,43 +389,23 @@ export async function syncToSupabase(waterIntakeData: WaterIntakeData): Promise<
         return;
       }
 
-      if (existingData && existingData.id) {
-        // Atualizar registro existente
-        const { error: updateError } = await supabase
-          .from('water_intake')
-          .update({
-            target_ml: waterIntakeData.target_ml,
-            consumed_ml: waterIntakeData.consumed_ml,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', existingData.id);
+      // Usar upsert atômico para evitar conflitos e garantir integridade
+      const { error: upsertError } = await supabase
+        .from('water_intake')
+        .upsert({
+          user_id: user.id,
+          date: today,
+          target_ml: waterIntakeData.target_ml,
+          consumed_ml: waterIntakeData.consumed_ml,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'user_id,date' });
 
-        if (updateError) {
-          if (updateError.code === '42P01') { // Tabela não existe
-            console.warn('A tabela water_intake não existe no banco de dados. Execute a migração necessária.');
-          } else {
-            console.error('Erro ao atualizar dados de hidratação:', updateError);
-          }
-        }
-      } else {
-        // Criar novo registro
-        const { error: insertError } = await supabase
-          .from('water_intake')
-          .insert({
-            user_id: user.id,
-            date: today,
-            target_ml: waterIntakeData.target_ml,
-            consumed_ml: waterIntakeData.consumed_ml,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          });
-
-        if (insertError) {
-          if (insertError.code === '42P01') { // Código para "tabela não existe"
-            console.warn('A tabela water_intake não existe no banco de dados. Execute a migração necessária.');
-          } else {
-            console.error('Erro ao inserir dados de hidratação:', insertError);
-          }
+      if (upsertError) {
+        if (upsertError.code === '42P01') {
+          console.warn('A tabela water_intake não existe no banco de dados. Execute a migração necessária.');
+        } else {
+          console.error('Erro ao fazer upsert de hidratação:', upsertError);
         }
       }
     } catch (dbError: any) {

@@ -47,7 +47,8 @@ const formatDateToYYYYMMDD = (date: Date): string => {
 };
 
 /**
- * Obtém o histórico de nutrição dos últimos 7 dias
+ * Obtém o histórico de nutrição dos últimos 7 dias, garantindo que todos os dias sejam exibidos
+ * mesmo que não haja dados registrados
  */
 export const getNutritionHistory = async (): Promise<NutritionHistorySummary[]> => {
   try {
@@ -62,7 +63,15 @@ export const getNutritionHistory = async (): Promise<NutritionHistorySummary[]> 
     // Data atual e data de 7 dias atrás
     const today = new Date();
     const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(today.getDate() - 7);
+    sevenDaysAgo.setDate(today.getDate() - 6); // -6 para incluir o dia atual (total de 7 dias)
+    
+    // Gerar um array com todas as datas dos últimos 7 dias
+    const last7Days: string[] = [];
+    for (let i = 0; i < 7; i++) {
+      const date = new Date();
+      date.setDate(today.getDate() - i);
+      last7Days.push(formatDateToYYYYMMDD(date));
+    }
     
     // Buscar refeições dos últimos 7 dias
     const { data, error } = await supabase
@@ -74,15 +83,11 @@ export const getNutritionHistory = async (): Promise<NutritionHistorySummary[]> 
     
     if (error) {
       console.error('Erro ao buscar histórico de nutrição:', error);
-      return [];
+      // Mesmo com erro, continuamos para gerar os dias vazios
     }
     
-    if (!data || data.length === 0) {
-      return [];
-    }
-    
-    // Converter os dados para MealRecord
-    const mealRecords: MealRecord[] = data.map(record => {
+    // Converter os dados para MealRecord, ou usar uma lista vazia se não houver dados
+    const mealRecords: MealRecord[] = data ? data.map(record => {
       // Garantir que meal_type seja um dos valores permitidos
       const validMealType = ['breakfast', 'lunch', 'dinner', 'snack'].includes(record.meal_type) 
         ? record.meal_type as 'breakfast' | 'lunch' | 'dinner' | 'snack'
@@ -102,7 +107,7 @@ export const getNutritionHistory = async (): Promise<NutritionHistorySummary[]> 
         timestamp: record.timestamp,
         foods: record.foods || []
       };
-    });
+    }) : [];
     
     // Agrupar por data
     const groupedByDate: Record<string, MealRecord[]> = {};
@@ -115,34 +120,62 @@ export const getNutritionHistory = async (): Promise<NutritionHistorySummary[]> 
       groupedByDate[date].push(meal);
     });
     
-    // Criar resumos diários
-    const summaries: NutritionHistorySummary[] = Object.entries(groupedByDate).map(([date, meals]) => {
-      const totalCalories = meals.reduce((sum, meal) => sum + meal.calories, 0);
-      const totalProtein = meals.reduce((sum, meal) => sum + meal.protein, 0);
-      const totalCarbs = meals.reduce((sum, meal) => sum + meal.carbs, 0);
-      const totalFat = meals.reduce((sum, meal) => sum + meal.fat, 0);
-      
-      return {
-        date,
-        day_name: getDayName(date),
-        total_calories: totalCalories,
-        total_protein: totalProtein,
-        total_carbs: totalCarbs,
-        total_fat: totalFat,
-        meal_count: meals.length,
-        meals: meals
-      };
+    // Inicializar summaries com entradas para todos os 7 dias
+    const summaries: NutritionHistorySummary[] = [];
+    
+    // Para cada um dos últimos 7 dias
+    last7Days.forEach(date => {
+      // Se temos refeições para este dia
+      if (groupedByDate[date]) {
+        const meals = groupedByDate[date];
+        const totalCalories = meals.reduce((sum, meal) => sum + meal.calories, 0);
+        const totalProtein = meals.reduce((sum, meal) => sum + meal.protein, 0);
+        const totalCarbs = meals.reduce((sum, meal) => sum + meal.carbs, 0);
+        const totalFat = meals.reduce((sum, meal) => sum + meal.fat, 0);
+        
+        summaries.push({
+          date,
+          day_name: getDayName(date),
+          total_calories: totalCalories,
+          total_protein: totalProtein,
+          total_carbs: totalCarbs,
+          total_fat: totalFat,
+          meal_count: meals.length,
+          meals: meals
+        });
+      } else {
+        // Se não temos refeições para este dia, criamos uma entrada vazia
+        summaries.push({
+          date,
+          day_name: getDayName(date),
+          total_calories: 0,
+          total_protein: 0,
+          total_carbs: 0,
+          total_fat: 0,
+          meal_count: 0,
+          meals: []
+        });
+      }
     });
     
     // Ordenar por data (mais recente primeiro)
     summaries.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     
-    // Verificar se há um registro para hoje, caso não, adicionar um vazio
-    const todayStr = formatDateToYYYYMMDD(today);
-    if (!summaries.some(s => s.date === todayStr)) {
-      summaries.unshift({
-        date: todayStr,
-        day_name: getDayName(todayStr),
+    return summaries;
+    
+  } catch (error) {
+    console.error('Erro ao buscar histórico de nutrição:', error);
+    
+    // Mesmo em caso de erro, retornamos 7 dias vazios
+    const emptySummaries: NutritionHistorySummary[] = [];
+    for (let i = 0; i < 7; i++) {
+      const date = new Date();
+      date.setDate(date.getDate() - i);
+      const dateStr = formatDateToYYYYMMDD(date);
+      
+      emptySummaries.push({
+        date: dateStr,
+        day_name: getDayName(dateStr),
         total_calories: 0,
         total_protein: 0,
         total_carbs: 0,
@@ -152,12 +185,7 @@ export const getNutritionHistory = async (): Promise<NutritionHistorySummary[]> 
       });
     }
     
-    // Limitar a 7 dias
-    return summaries.slice(0, 7);
-    
-  } catch (error) {
-    console.error('Erro ao buscar histórico de nutrição:', error);
-    return [];
+    return emptySummaries;
   }
 };
 

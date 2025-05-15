@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import UserMetricsDisplay from "./UserMetricsDisplay";
 import { 
   Card, 
   CardContent, 
@@ -41,7 +42,9 @@ import {
   getMealTypeName,
   formatDate
 } from "@/services/userProgressTrackingService";
-import { MealRecordType, ProgressPhoto } from "@/types/supabase";
+import { getUserByIdWithFullDetails } from "@/services/nutriUsersService";
+// Removido a referência a tipos não existentes
+// import { MealRecordType, ProgressPhoto } from "@/types/supabase";
 
 interface UserProgressDashboardProps {
   mockUsers: any[];
@@ -59,14 +62,26 @@ const UserProgressDashboard: React.FC<UserProgressDashboardProps> = ({ mockUsers
   );
   
   const handleSelectUser = async (user: any) => {
-    setSelectedUser(user);
     setIsLoading(true);
     
     try {
-      const data = await getUserProgressAnalysis(user.id);
-      setProgressData(data);
+      // Carregar dados de progresso
+      const progressData = await getUserProgressAnalysis(user.id);
+      setProgressData(progressData);
+      
+      // Carregar dados completos do usuário, incluindo exames
+      const userDetails = await getUserByIdWithFullDetails(user.id);
+      if (userDetails) {
+        setSelectedUser(userDetails);
+      } else {
+        // Fallback para os dados básicos se não conseguir carregar os detalhes
+        setSelectedUser(user);
+        console.warn("Não foi possível carregar detalhes completos do usuário");
+      }
     } catch (error) {
-      console.error("Erro ao carregar dados de progresso:", error);
+      console.error("Erro ao carregar dados do usuário:", error);
+      // Fallback para os dados básicos em caso de erro
+      setSelectedUser(user);
     } finally {
       setIsLoading(false);
     }
@@ -302,12 +317,13 @@ const UserProgressDashboard: React.FC<UserProgressDashboardProps> = ({ mockUsers
           </CardHeader>
           <CardContent>
             {isLoading ? (
-              <div className="py-8 text-center">
-                <div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto"></div>
-                <p className="mt-2 text-slate-500">Carregando dados...</p>
+              <div className="py-6 text-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+                <p className="mt-2 text-slate-500">Carregando dados do usuário...</p>
               </div>
-            ) : progressData ? (
+            ) : selectedUser ? (
               <div className="space-y-6">
+                <UserMetricsDisplay user={selectedUser} />
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <h3 className="text-lg font-medium mb-2 flex items-center gap-2">

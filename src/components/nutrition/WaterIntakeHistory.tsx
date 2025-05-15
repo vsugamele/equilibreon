@@ -170,17 +170,7 @@ export default function WaterIntakeHistory({ days = 7 }: WaterHistoryProps) {
   };
   
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="flex items-center text-xl">
-          <TrendingUp className="h-5 w-5 mr-2 text-blue-500" />
-          Histórico de Hidratação
-        </CardTitle>
-        <CardDescription>
-          Acompanhe seu progresso de hidratação ao longo do tempo
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
+    <div className="w-full">
         <Tabs 
           defaultValue="7" 
           className="w-full" 
@@ -213,7 +203,6 @@ export default function WaterIntakeHistory({ days = 7 }: WaterHistoryProps) {
             <p className="text-lg font-semibold">{getAverageConsumption()}ml</p>
           </div>
         </div>
-      </CardContent>
-    </Card>
+    </div>
   );
 }

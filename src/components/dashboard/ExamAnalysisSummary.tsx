@@ -71,18 +71,58 @@ const ExamAnalysisSummary: React.FC<ExamAnalysisSummaryProps> = ({
       // Pegar o primeiro resultado (o mais recente se latestOnly=true)
       const analysis = data[0];
       
+      // Extrair informações do exame
+      if (analysis.medical_exams) {
+        setExamInfo({
+          examType: analysis.medical_exams.exam_type || 'Exame Laboratorial',
+          examDate: formatDate(analysis.medical_exams.exam_date),
+          patientName: analysis.medical_exams.patient_name || 'Paciente'
+        });
+      }
+      
       // Verificar se temos um texto de análise
+      // Carregar os dados diretamente da tabela medical_exams
+      if (analysis.medical_exams && analysis.medical_exams.id) {
+        try {
+          // Buscar o exame completo para obter análise completa
+          const { data: examData, error: examError } = await supabase
+            .from('medical_exams')
+            .select('*')
+            .eq('id', analysis.medical_exams.id)
+            .single();
+            
+          if (examError) {
+            console.error('Erro ao carregar exame completo:', examError);
+          } else if (examData) {
+            console.log('Dados completos do exame:', examData);
+            
+            // Tentar usar o campo analysis JSON se disponível
+            if (examData.analysis && typeof examData.analysis === 'object') {
+              try {
+                // Verificar se tem recommendations e usar o texto completo
+                if (examData.analysis.recommendations && 
+                    Array.isArray(examData.analysis.recommendations) && 
+                    examData.analysis.recommendations.length > 0 && 
+                    typeof examData.analysis.recommendations[0] === 'string') {
+                  // Usar o texto completo da análise
+                  setAnalysisText(examData.analysis.recommendations[0]);
+                  console.log('Usando texto completo da análise do recommendations[0]');
+                  return;
+                }
+              } catch (err) {
+                console.error('Erro ao extrair texto da análise JSON:', err);
+              }
+            }
+          }
+        } catch (fetchErr) {
+          console.error('Erro ao buscar exame completo:', fetchErr);
+        }
+      }
+      
+      // Fallback para o campo análise original
       if (analysis.analysis_text) {
         setAnalysisText(analysis.analysis_text);
-        
-        // Extrair informações do exame
-        if (analysis.medical_exams) {
-          setExamInfo({
-            examType: analysis.medical_exams.exam_type || 'Exame Laboratorial',
-            examDate: formatDate(analysis.medical_exams.exam_date),
-            patientName: analysis.medical_exams.patient_name || 'Paciente'
-          });
-        }
+        console.log('Usando texto da análise do campo analysis_text');
       }
     } catch (error) {
       console.error('Erro ao carregar análise:', error);
